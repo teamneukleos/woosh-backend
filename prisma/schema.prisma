@@ -1,0 +1,859 @@
+// Kreate — Nigeria creator-brand marketplace
+// Prisma 6.7 · PostgreSQL · money in kobo (BigInt)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum IntendedRole {
+  CREATOR
+  BRAND
+}
+
+enum OAuthProvider {
+  GOOGLE
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+}
+
+enum BrandIndustry {
+  FMCG
+  FINTECH
+  FASHION
+  TELCO
+  BEAUTY
+  FOOD
+  OTHER
+}
+
+enum BrandServiceMode {
+  MANAGED
+  SELF_SERVE
+}
+
+enum BrandStatus {
+  PROSPECT
+  ACTIVE
+  CHURNED
+}
+
+enum BrandMemberRole {
+  OWNER
+  MANAGER
+  VIEWER
+  AGENCY
+}
+
+enum CreatorTier {
+  NANO
+  MICRO
+  MID
+}
+
+enum ContentLanguage {
+  EN
+  PIDGIN
+  YO
+  IG
+  HA
+}
+
+enum CreatorMembership {
+  FREE
+  PREMIUM
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  BANNED
+}
+
+enum SocialPlatform {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+}
+
+enum SyncSource {
+  API
+  MANUAL_SCREENSHOT
+}
+
+enum CampaignStatus {
+  DRAFT
+  FUNDED
+  RECRUITING
+  ACTIVE
+  IN_REVIEW
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum InviteStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum AssignmentStatus {
+  ACCEPTED
+  CONTRACTED
+  DRAFTING
+  SUBMITTED
+  REVISION
+  APPROVED
+  PUBLISHED
+  PAID
+  CANCELLED
+}
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  SIGNED
+  VOIDED
+}
+
+enum DeliverableStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REVISION_REQUESTED
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_BRAND
+  RESOLVED_CREATOR
+  CANCELLED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+  FLUTTERWAVE
+}
+
+enum BrandPaymentType {
+  ESCROW_FUND
+  TOP_UP
+  MANAGED_FEE
+}
+
+enum BrandPaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum EscrowEntryType {
+  CREDIT
+  HOLD
+  RELEASE
+  REFUND
+  COMMISSION
+}
+
+enum WalletTxType {
+  CAMPAIGN_CREDIT
+  BONUS
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum InvoiceKind {
+  BRAND_INVOICE
+  CREATOR_RECEIPT
+}
+
+enum MetricSource {
+  API
+  MANUAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+}
+
+enum AiDisclosureMode {
+  ALWAYS_DISCLOSED
+  BRAND_DISCRETION
+}
+
+enum AiContentStatus {
+  GENERATED
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  REJECTED
+}
+
+// ─── Identity ────────────────────────────────────────────────────────────────
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique @db.Citext
+  phone        String?       @db.VarChar(20)
+  passwordHash String?       @map("password_hash")
+  firstName    String        @map("first_name") @db.VarChar(100)
+  lastName     String        @map("last_name") @db.VarChar(100)
+  avatarUrl    String?       @map("avatar_url")
+  status       UserStatus    @default(PENDING)
+  /// Role the user chose at signup; used to resume onboarding if they drop off mid-flow
+  intendedRole IntendedRole? @map("intended_role")
+  lastLoginAt  DateTime?     @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  oauthAccounts          OAuthAccount[]
+  brandMemberships       BrandMember[]
+  creator                Creator?
+  shortlistsCreated      Shortlist[]            @relation("ShortlistCreator")
+  campaignsCreated       Campaign[]             @relation("CampaignCreator")
+  deliverablesReviewed   Deliverable[]          @relation("DeliverableReviewer")
+  disputesOpened         Dispute[]              @relation("DisputeOpener")
+  disputesResolved       Dispute[]              @relation("DisputeResolver")
+  notifications          Notification[]
+  aiContentReviewed      AiPersonaContent[]     @relation("AiContentReviewer")
+
+  @@index([phone])
+  @@index([status])
+  @@map("users")
+}
+
+model OAuthAccount {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  provider          OAuthProvider
+  providerAccountId String        @map("provider_account_id")
+  accessTokenEnc    Bytes         @map("access_token_enc")
+  refreshTokenEnc   Bytes?        @map("refresh_token_enc")
+  scopes            String[]
+  expiresAt         DateTime?     @map("expires_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialAccounts  CreatorSocialAccount[]
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model Brand {
+  id           String           @id @default(uuid()) @db.Uuid
+  name         String           @db.VarChar(200)
+  slug         String           @unique @db.VarChar(120)
+  industry     BrandIndustry
+  logoUrl      String?          @map("logo_url")
+  website      String?
+  countryCode  String           @default("NG") @map("country_code") @db.Char(2)
+  billingEmail String           @map("billing_email") @db.Citext
+  serviceMode  BrandServiceMode @default(MANAGED) @map("service_mode")
+  status       BrandStatus      @default(PROSPECT)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  members       BrandMember[]
+  campaigns     Campaign[]
+  shortlists    Shortlist[]
+  payments      BrandPayment[]
+  invoices      Invoice[]
+  aiPersonas    AiPersona[]
+
+  @@index([industry])
+  @@index([status])
+  @@map("brands")
+}
+
+model BrandMember {
+  id         String          @id @default(uuid()) @db.Uuid
+  brandId    String          @map("brand_id") @db.Uuid
+  userId     String          @map("user_id") @db.Uuid
+  role       BrandMemberRole @default(MANAGER)
+  invitedAt  DateTime        @default(now()) @map("invited_at") @db.Timestamptz(6)
+  acceptedAt DateTime?       @map("accepted_at") @db.Timestamptz(6)
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([brandId, userId])
+  @@index([userId])
+  @@map("brand_members")
+}
+
+// ─── Creators ────────────────────────────────────────────────────────────────
+
+model Creator {
+  id                   String             @id @default(uuid()) @db.Uuid
+  userId               String             @unique @map("user_id") @db.Uuid
+  displayName          String             @map("display_name") @db.VarChar(150)
+  bio                  String?
+  locationState        String             @map("location_state") @db.VarChar(80)
+  locationCity         String?            @map("location_city") @db.VarChar(80)
+  tier                 CreatorTier        @default(NANO)
+  primaryLanguage      ContentLanguage    @default(EN) @map("primary_language")
+  authenticityScore    Decimal?           @map("authenticity_score") @db.Decimal(5, 2)
+  authenticityScoredAt DateTime?          @map("authenticity_scored_at") @db.Timestamptz(6)
+  rateMinKobo          BigInt?            @map("rate_min_kobo")
+  rateMaxKobo          BigInt?            @map("rate_max_kobo")
+  membership           CreatorMembership  @default(FREE)
+  membershipExpiresAt  DateTime?          @map("membership_expires_at") @db.Timestamptz(6)
+  verificationStatus   VerificationStatus @default(PENDING) @map("verification_status")
+  referralCode         String             @unique @map("referral_code") @db.VarChar(20)
+  referredById         String?            @map("referred_by_id") @db.Uuid
+  priorityBriefUntil   DateTime?          @map("priority_brief_until") @db.Timestamptz(6)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referredBy         Creator?                 @relation("CreatorReferrals", fields: [referredById], references: [id])
+  referrals          Creator[]                @relation("CreatorReferrals")
+  socialAccounts     CreatorSocialAccount[]
+  niches             CreatorNiche[]
+  languages          CreatorLanguage[]
+  authenticityRuns   AuthenticityScoreRun[]
+  shortlistEntries   ShortlistCreator[]
+  invites            CampaignInvite[]
+  assignments        CampaignAssignment[]
+  bankAccounts       CreatorBankAccount[]
+  wallet             CreatorWallet?
+  walletTransactions WalletTransaction[]
+  payouts            Payout[]
+  invoices           Invoice[]
+
+  @@index([verificationStatus, authenticityScore])
+  @@index([locationState])
+  @@index([tier])
+  @@map("creators")
+}
+
+model CreatorSocialAccount {
+  id              String         @id @default(uuid()) @db.Uuid
+  creatorId       String         @map("creator_id") @db.Uuid
+  platform        SocialPlatform
+  handle          String         @db.VarChar(100)
+  platformUserId  String?        @map("platform_user_id")
+  profileUrl      String?        @map("profile_url")
+  followerCount   Int            @default(0) @map("follower_count")
+  engagementRate  Decimal?       @map("engagement_rate") @db.Decimal(6, 4)
+  isPrimary       Boolean        @default(false) @map("is_primary")
+  lastSyncedAt    DateTime?      @map("last_synced_at") @db.Timestamptz(6)
+  syncSource      SyncSource     @default(MANUAL_SCREENSHOT) @map("sync_source")
+  oauthAccountId  String?        @map("oauth_account_id") @db.Uuid
+
+  creator      Creator       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  oauthAccount OAuthAccount? @relation(fields: [oauthAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, handle])
+  @@index([creatorId])
+  @@index([followerCount])
+  @@map("creator_social_accounts")
+}
+
+model Niche {
+  id       String  @id @default(uuid()) @db.Uuid
+  slug     String  @unique @db.VarChar(80)
+  name     String  @db.VarChar(120)
+  isActive Boolean @default(true) @map("is_active")
+
+  creators CreatorNiche[]
+
+  @@map("niches")
+}
+
+model CreatorNiche {
+  creatorId String @map("creator_id") @db.Uuid
+  nicheId   String @map("niche_id") @db.Uuid
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  niche   Niche   @relation(fields: [nicheId], references: [id], onDelete: Cascade)
+
+  @@id([creatorId, nicheId])
+  @@map("creator_niches")
+}
+
+model CreatorLanguage {
+  creatorId String          @map("creator_id") @db.Uuid
+  language  ContentLanguage
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@id([creatorId, language])
+  @@map("creator_languages")
+}
+
+model AuthenticityScoreRun {
+  id           String   @id @default(uuid()) @db.Uuid
+  creatorId    String   @map("creator_id") @db.Uuid
+  score        Decimal  @db.Decimal(5, 2)
+  factors      Json
+  modelVersion String   @map("model_version") @db.VarChar(40)
+  computedAt   DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, computedAt(sort: Desc)])
+  @@map("authenticity_score_runs")
+}
+
+model Shortlist {
+  id              String   @id @default(uuid()) @db.Uuid
+  brandId         String   @map("brand_id") @db.Uuid
+  name            String   @db.VarChar(150)
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  brand     Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  createdBy User               @relation("ShortlistCreator", fields: [createdByUserId], references: [id])
+  creators  ShortlistCreator[]
+
+  @@index([brandId])
+  @@map("shortlists")
+}
+
+model ShortlistCreator {
+  shortlistId String   @map("shortlist_id") @db.Uuid
+  creatorId   String   @map("creator_id") @db.Uuid
+  notes       String?
+  addedAt     DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  shortlist Shortlist @relation(fields: [shortlistId], references: [id], onDelete: Cascade)
+  creator   Creator   @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@id([shortlistId, creatorId])
+  @@map("shortlist_creators")
+}
+
+// ─── Campaigns ───────────────────────────────────────────────────────────────
+
+model Campaign {
+  id                         String         @id @default(uuid()) @db.Uuid
+  brandId                    String         @map("brand_id") @db.Uuid
+  createdByUserId            String         @map("created_by_user_id") @db.Uuid
+  title                      String         @db.VarChar(200)
+  status                     CampaignStatus @default(DRAFT)
+  productName                String         @map("product_name") @db.VarChar(200)
+  productDescription         String?        @map("product_description")
+  deliverablesSpec           Json           @map("deliverables_spec")
+  dos                        String?
+  donts                      String?
+  deadlineAt                 DateTime       @map("deadline_at") @db.Timestamptz(6)
+  compensationPerCreatorKobo BigInt         @map("compensation_per_creator_kobo")
+  bonusRules                 Json?          @map("bonus_rules")
+  bonusAmountKobo            BigInt?        @map("bonus_amount_kobo")
+  slotsTotal                 Int            @map("slots_total")
+  slotsFilled                Int            @default(0) @map("slots_filled")
+  commissionBps              Int            @default(1500) @map("commission_bps")
+  managedUpliftBps           Int?           @map("managed_uplift_bps")
+  totalBudgetKobo            BigInt         @map("total_budget_kobo")
+  currency                   String         @default("NGN") @db.Char(3)
+  publishedAt                DateTime?      @map("published_at") @db.Timestamptz(6)
+  completedAt                DateTime?      @map("completed_at") @db.Timestamptz(6)
+  createdAt                  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  brand       Brand                @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  createdBy   User                 @relation("CampaignCreator", fields: [createdByUserId], references: [id])
+  invites     CampaignInvite[]
+  assignments CampaignAssignment[]
+  payments    BrandPayment[]
+  escrow      EscrowLedger[]
+  invoices    Invoice[]
+  report      CampaignReport?
+  aiContent   AiPersonaContent[]
+
+  @@index([brandId, status])
+  @@index([deadlineAt])
+  @@index([status, publishedAt])
+  @@map("campaigns")
+}
+
+model CampaignInvite {
+  id          String       @id @default(uuid()) @db.Uuid
+  campaignId  String       @map("campaign_id") @db.Uuid
+  creatorId   String       @map("creator_id") @db.Uuid
+  status      InviteStatus @default(INVITED)
+  message     String?
+  invitedAt   DateTime     @default(now()) @map("invited_at") @db.Timestamptz(6)
+  respondByAt DateTime     @map("respond_by_at") @db.Timestamptz(6)
+  respondedAt DateTime?    @map("responded_at") @db.Timestamptz(6)
+
+  campaign   Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator    Creator             @relation(fields: [creatorId], references: [id], onDelete: Restrict)
+  assignment CampaignAssignment?
+
+  @@unique([campaignId, creatorId])
+  @@index([creatorId, status])
+  @@index([respondByAt])
+  @@map("campaign_invites")
+}
+
+model CampaignAssignment {
+  id            String           @id @default(uuid()) @db.Uuid
+  campaignId    String           @map("campaign_id") @db.Uuid
+  creatorId     String           @map("creator_id") @db.Uuid
+  inviteId      String           @unique @map("invite_id") @db.Uuid
+  status        AssignmentStatus @default(ACCEPTED)
+  agreedFeeKobo BigInt           @map("agreed_fee_kobo")
+  trackingCode  String           @unique @map("tracking_code") @db.VarChar(40)
+  utmUrl        String?          @map("utm_url")
+  discountCode  String?          @map("discount_code") @db.VarChar(40)
+  acceptedAt    DateTime         @default(now()) @map("accepted_at") @db.Timestamptz(6)
+  approvedAt    DateTime?        @map("approved_at") @db.Timestamptz(6)
+  publishedAt   DateTime?        @map("published_at") @db.Timestamptz(6)
+
+  campaign             Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator              Creator               @relation(fields: [creatorId], references: [id], onDelete: Restrict)
+  invite               CampaignInvite        @relation(fields: [inviteId], references: [id])
+  contract             Contract?
+  deliverables         Deliverable[]
+  disputes             Dispute[]
+  escrowEntries        EscrowLedger[]
+  walletTransactions   WalletTransaction[]
+  payouts              Payout[]
+  engagementSnapshots  EngagementSnapshot[]
+
+  @@unique([campaignId, creatorId])
+  @@index([status])
+  @@map("campaign_assignments")
+}
+
+model Contract {
+  id            String         @id @default(uuid()) @db.Uuid
+  assignmentId  String         @unique @map("assignment_id") @db.Uuid
+  version       Int            @default(1)
+  termsSnapshot Json           @map("terms_snapshot")
+  status        ContractStatus @default(DRAFT)
+  pdfUrl        String?        @map("pdf_url")
+  signedAt      DateTime?      @map("signed_at") @db.Timestamptz(6)
+  signerIp      String?        @map("signer_ip") @db.Inet
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  assignment CampaignAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@map("contracts")
+}
+
+model Deliverable {
+  id               String            @id @default(uuid()) @db.Uuid
+  assignmentId     String            @map("assignment_id") @db.Uuid
+  round            Int               @db.SmallInt
+  status           DeliverableStatus @default(DRAFT)
+  platform         SocialPlatform
+  mediaUrls        Json              @map("media_urls")
+  caption          String?
+  postUrl          String?           @map("post_url")
+  submittedAt      DateTime?         @map("submitted_at") @db.Timestamptz(6)
+  reviewedAt       DateTime?         @map("reviewed_at") @db.Timestamptz(6)
+  reviewedByUserId String?           @map("reviewed_by_user_id") @db.Uuid
+  revisionNotes    String?           @map("revision_notes")
+
+  assignment          CampaignAssignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  reviewedBy          User?                @relation("DeliverableReviewer", fields: [reviewedByUserId], references: [id])
+  engagementSnapshots EngagementSnapshot[]
+
+  @@index([assignmentId, round])
+  @@index([status])
+  @@map("deliverables")
+}
+
+model Dispute {
+  id               String        @id @default(uuid()) @db.Uuid
+  assignmentId     String        @map("assignment_id") @db.Uuid
+  openedByUserId   String        @map("opened_by_user_id") @db.Uuid
+  reason           String
+  status           DisputeStatus @default(OPEN)
+  resolutionNotes  String?       @map("resolution_notes")
+  resolvedByUserId String?       @map("resolved_by_user_id") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt       DateTime?     @map("resolved_at") @db.Timestamptz(6)
+
+  assignment CampaignAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  openedBy   User               @relation("DisputeOpener", fields: [openedByUserId], references: [id])
+  resolvedBy User?              @relation("DisputeResolver", fields: [resolvedByUserId], references: [id])
+
+  @@index([assignmentId])
+  @@index([status])
+  @@map("disputes")
+}
+
+// ─── Payments ────────────────────────────────────────────────────────────────
+
+model BrandPayment {
+  id                String             @id @default(uuid()) @db.Uuid
+  campaignId        String             @map("campaign_id") @db.Uuid
+  brandId           String             @map("brand_id") @db.Uuid
+  provider          PaymentProvider
+  providerReference String             @unique @map("provider_reference")
+  amountKobo        BigInt             @map("amount_kobo")
+  currency          String             @default("NGN") @db.Char(3)
+  type              BrandPaymentType
+  status            BrandPaymentStatus @default(PENDING)
+  rawWebhook        Json?              @map("raw_webhook")
+  paidAt            DateTime?          @map("paid_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  brand    Brand    @relation(fields: [brandId], references: [id], onDelete: Restrict)
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("brand_payments")
+}
+
+model EscrowLedger {
+  id               String          @id @default(uuid()) @db.Uuid
+  campaignId       String          @map("campaign_id") @db.Uuid
+  entryType        EscrowEntryType @map("entry_type")
+  amountKobo       BigInt          @map("amount_kobo")
+  balanceAfterKobo BigInt          @map("balance_after_kobo")
+  assignmentId     String?         @map("assignment_id") @db.Uuid
+  payoutId         String?         @map("payout_id") @db.Uuid
+  idempotencyKey   String          @unique @map("idempotency_key")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  campaign   Campaign            @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  assignment CampaignAssignment? @relation(fields: [assignmentId], references: [id])
+  payout     Payout?             @relation(fields: [payoutId], references: [id])
+
+  @@index([campaignId, createdAt])
+  @@index([assignmentId])
+  @@map("escrow_ledger")
+}
+
+model CreatorBankAccount {
+  id                    String   @id @default(uuid()) @db.Uuid
+  creatorId             String   @map("creator_id") @db.Uuid
+  bankCode              String   @map("bank_code") @db.VarChar(10)
+  bankName              String   @map("bank_name") @db.VarChar(120)
+  accountNumberEnc      Bytes    @map("account_number_enc")
+  accountName           String   @map("account_name") @db.VarChar(150)
+  paystackRecipientCode String?  @map("paystack_recipient_code")
+  isDefault             Boolean  @default(false) @map("is_default")
+  isVerified            Boolean  @default(false) @map("is_verified")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator Creator  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  payouts Payout[]
+
+  @@index([creatorId])
+  @@map("creator_bank_accounts")
+}
+
+model CreatorWallet {
+  creatorId     String   @id @map("creator_id") @db.Uuid
+  availableKobo BigInt   @default(0) @map("available_kobo")
+  pendingKobo   BigInt   @default(0) @map("pending_kobo")
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@map("creator_wallets")
+}
+
+model WalletTransaction {
+  id               String       @id @default(uuid()) @db.Uuid
+  creatorId        String       @map("creator_id") @db.Uuid
+  type             WalletTxType
+  amountKobo       BigInt       @map("amount_kobo")
+  balanceAfterKobo BigInt       @map("balance_after_kobo")
+  reference        String       @unique
+  payoutId         String?      @map("payout_id") @db.Uuid
+  assignmentId     String?      @map("assignment_id") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator    Creator             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  payout     Payout?             @relation(fields: [payoutId], references: [id])
+  assignment CampaignAssignment? @relation(fields: [assignmentId], references: [id])
+
+  @@index([creatorId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model Payout {
+  id                   String          @id @default(uuid()) @db.Uuid
+  creatorId            String          @map("creator_id") @db.Uuid
+  assignmentId         String?         @map("assignment_id") @db.Uuid
+  bankAccountId        String          @map("bank_account_id") @db.Uuid
+  amountKobo           BigInt          @map("amount_kobo")
+  provider             PaymentProvider
+  providerTransferCode String?         @map("provider_transfer_code")
+  status               PayoutStatus    @default(PENDING)
+  failureReason        String?         @map("failure_reason")
+  dueBy                DateTime        @map("due_by") @db.Date
+  initiatedAt          DateTime?       @map("initiated_at") @db.Timestamptz(6)
+  completedAt          DateTime?       @map("completed_at") @db.Timestamptz(6)
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator            Creator              @relation(fields: [creatorId], references: [id], onDelete: Restrict)
+  assignment         CampaignAssignment?  @relation(fields: [assignmentId], references: [id])
+  bankAccount        CreatorBankAccount   @relation(fields: [bankAccountId], references: [id])
+  escrowEntries      EscrowLedger[]
+  walletTransactions WalletTransaction[]
+
+  @@index([status, dueBy])
+  @@index([creatorId])
+  @@index([assignmentId])
+  @@map("payouts")
+}
+
+model Invoice {
+  id            String      @id @default(uuid()) @db.Uuid
+  brandId       String?     @map("brand_id") @db.Uuid
+  creatorId     String?     @map("creator_id") @db.Uuid
+  campaignId    String      @map("campaign_id") @db.Uuid
+  kind          InvoiceKind
+  invoiceNumber String      @unique @map("invoice_number")
+  subtotalKobo  BigInt      @map("subtotal_kobo")
+  taxKobo       BigInt      @default(0) @map("tax_kobo")
+  totalKobo     BigInt      @map("total_kobo")
+  pdfUrl        String?     @map("pdf_url")
+  issuedAt      DateTime    @default(now()) @map("issued_at") @db.Timestamptz(6)
+
+  brand    Brand?   @relation(fields: [brandId], references: [id])
+  creator  Creator? @relation(fields: [creatorId], references: [id])
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  @@index([campaignId])
+  @@map("invoices")
+}
+
+// ─── Analytics ───────────────────────────────────────────────────────────────
+
+model EngagementSnapshot {
+  id             String         @id @default(uuid()) @db.Uuid
+  assignmentId   String         @map("assignment_id") @db.Uuid
+  deliverableId  String?        @map("deliverable_id") @db.Uuid
+  platform       SocialPlatform
+  externalPostId String?        @map("external_post_id")
+  reach          BigInt?
+  impressions    BigInt?
+  likes          BigInt?
+  comments       BigInt?
+  shares         BigInt?
+  saves          BigInt?
+  views          BigInt?
+  clicks         BigInt?
+  conversions    BigInt?
+  source         MetricSource   @default(API)
+  capturedAt     DateTime       @default(now()) @map("captured_at") @db.Timestamptz(6)
+
+  assignment  CampaignAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  deliverable Deliverable?       @relation(fields: [deliverableId], references: [id])
+
+  @@index([assignmentId, capturedAt(sort: Desc)])
+  @@map("engagement_snapshots")
+}
+
+model CampaignReport {
+  id          String   @id @default(uuid()) @db.Uuid
+  campaignId  String   @unique @map("campaign_id") @db.Uuid
+  metrics     Json
+  generatedAt DateTime @default(now()) @map("generated_at") @db.Timestamptz(6)
+  pdfUrl      String?  @map("pdf_url")
+  xlsxUrl     String?  @map("xlsx_url")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_reports")
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  channel   NotificationChannel
+  template  String              @db.VarChar(80)
+  payload   Json
+  status    NotificationStatus  @default(QUEUED)
+  sentAt    DateTime?           @map("sent_at") @db.Timestamptz(6)
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([channel, status])
+  @@map("notifications")
+}
+
+// ─── Phase 2 — AI personas ───────────────────────────────────────────────────
+
+model AiPersona {
+  id                  String           @id @default(uuid()) @db.Uuid
+  brandId             String           @map("brand_id") @db.Uuid
+  name                String           @db.VarChar(120)
+  niche               String           @db.VarChar(120)
+  voiceSpec           Json             @map("voice_spec")
+  visualStyle         Json             @map("visual_style")
+  disclosureMode      AiDisclosureMode @default(ALWAYS_DISCLOSED) @map("disclosure_mode")
+  isActive            Boolean          @default(true) @map("is_active")
+  monthlyRetainerKobo BigInt?          @map("monthly_retainer_kobo")
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  brand   Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  content AiPersonaContent[]
+
+  @@index([brandId])
+  @@map("ai_personas")
+}
+
+model AiPersonaContent {
+  id               String          @id @default(uuid()) @db.Uuid
+  personaId        String          @map("persona_id") @db.Uuid
+  campaignId       String?         @map("campaign_id") @db.Uuid
+  draftPayload     Json            @map("draft_payload")
+  status           AiContentStatus @default(GENERATED)
+  reviewedByUserId String?         @map("reviewed_by_user_id") @db.Uuid
+  isAiDisclosed    Boolean         @default(true) @map("is_ai_disclosed")
+  publishedAt      DateTime?       @map("published_at") @db.Timestamptz(6)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  persona    AiPersona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+  reviewedBy User?     @relation("AiContentReviewer", fields: [reviewedByUserId], references: [id])
+
+  @@index([personaId, status])
+  @@map("ai_persona_content")
+}

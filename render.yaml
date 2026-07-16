@@ -1,0 +1,29 @@
+# Render Blueprint — staging API for Kreate
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Database: use your own (e.g. Vercel Postgres). Set DATABASE_URL in the
+# Render dashboard — include ?schema=kreate (and SSL params if required).
+
+services:
+  - type: web
+    name: kreate-api-staging
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_SECRET
+        generateValue: true
+      # Full connection string from Vercel (or other). Do not leave blank.
+      - key: DATABASE_URL
+        sync: false
+      # Comma-separated frontend origins, e.g. https://staging.kreate.ng,http://localhost:5173
+      - key: CORS_ORIGINS
+        sync: false

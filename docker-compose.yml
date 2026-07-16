@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kreate-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      # Used only on first volume init. Existing volumes keep their original DB name.
+      POSTGRES_DB: kreate
+    ports:
+      - "5432:5432"
+    volumes:
+      - kreate_pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Ensures the app database exists even when the volume was created with an older name
+  db-init:
+    image: postgres:16-alpine
+    container_name: kreate-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: root
+    entrypoint:
+      - sh
+      - -c
+      - |
+        psql -h db -U postgres -d postgres -v ON_ERROR_STOP=1 <<-EOSQL
+          SELECT 'CREATE DATABASE kreate'
+          WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kreate')\gexec
+          \c kreate
+          CREATE SCHEMA IF NOT EXISTS kreate;
+          CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA kreate;
+        EOSQL
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kreate-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:root@db:5432/kreate?schema=kreate
+      JWT_SECRET: change-me-in-production-use-a-long-random-string
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3001
+    ports:
+      - "3000:3000"
+
+volumes:
+  kreate_pg_data:

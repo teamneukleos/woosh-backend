@@ -1,0 +1,76 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build / compiled output
+dist/
+build/
+tmp/
+temp/
+*.tsbuildinfo
+
+# Prisma generated client (if using custom output)
+/generated/prisma
+
+# Environment & secrets — keep .env.example tracked
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+service-account*.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDEs & editors
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# VS Code — ignore local/user state; keep shared workspace tips if present
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Optional tooling caches
+.eslintcache
+.prettiercache
+.cache/
+.turbo/
+.nx/
+
+# Docker overrides (local-only compose tweaks)
+docker-compose.override.yml
+
+# Misc
+*.tgz
+.npm
+.yarn-integrity
