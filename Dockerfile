@@ -28,11 +28,7 @@ ENV PORT=3000
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-# prisma CLI is a devDependency but needed for generate + schema sync at startup
-RUN npm ci --omit=dev \
-  && npm install prisma@6.7.0 --no-save \
-  && npx prisma generate \
-  && npm cache clean --force
+RUN npm ci --omit=dev && npx prisma generate && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
