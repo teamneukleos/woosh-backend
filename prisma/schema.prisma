@@ -246,6 +246,7 @@ model User {
   oauthAccounts          OAuthAccount[]
   brandMemberships       BrandMember[]
   creator                Creator?
+  passwordResetTokens    PasswordResetToken[]
   shortlistsCreated      Shortlist[]            @relation("ShortlistCreator")
   campaignsCreated       Campaign[]             @relation("CampaignCreator")
   deliverablesReviewed   Deliverable[]          @relation("DeliverableReviewer")
@@ -257,6 +258,21 @@ model User {
   @@index([phone])
   @@index([status])
   @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model OAuthAccount {

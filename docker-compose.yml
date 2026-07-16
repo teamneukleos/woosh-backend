@@ -58,6 +58,10 @@ services:
       JWT_SECRET: change-me-in-production-use-a-long-random-string
       JWT_EXPIRES_IN: 7d
       CORS_ORIGINS: http://localhost:5173,http://localhost:3001
+      FRONTEND_URL: http://localhost:5173
+      EMAIL_FROM: Kreate <onboarding@resend.dev>
+      PASSWORD_RESET_EXPIRES_MINUTES: "30"
+      # RESEND_API_KEY: set in a local .env / override if you want real emails
     ports:
       - "3000:3000"
 
