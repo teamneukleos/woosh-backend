@@ -8,7 +8,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-RUN npm ci
+# Use npm install (not npm ci) so Windows-generated lockfiles still build on Linux
+RUN npm install
 
 COPY . .
 
@@ -28,7 +29,7 @@ ENV PORT=3000
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
 
-RUN npm ci --omit=dev && npx prisma generate && npm cache clean --force
+RUN npm install --omit=dev && npx prisma generate && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
