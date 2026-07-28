@@ -62,6 +62,12 @@ services:
       EMAIL_FROM: Kreate <onboarding@resend.dev>
       PASSWORD_RESET_EXPIRES_MINUTES: "30"
       # RESEND_API_KEY: set in a local .env / override if you want real emails
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_YOUTUBE_REDIRECT_URI: ${GOOGLE_YOUTUBE_REDIRECT_URI:-http://localhost:3000/creators/social/youtube/callback}
+      SOCIAL_OAUTH_FRONTEND_REDIRECT_URL: ${SOCIAL_OAUTH_FRONTEND_REDIRECT_URL:-http://localhost:3000/oauth/youtube}
+      SOCIAL_OAUTH_STATE_SECRET: ${SOCIAL_OAUTH_STATE_SECRET:-local-social-oauth-state-secret}
+      SOCIAL_TOKEN_ENCRYPTION_KEY: ${SOCIAL_TOKEN_ENCRYPTION_KEY:-local-social-token-encryption-key}
     ports:
       - "3000:3000"
 

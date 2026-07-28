@@ -400,7 +400,8 @@ model CreatorSocialAccount {
   creator      Creator       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   oauthAccount OAuthAccount? @relation(fields: [oauthAccountId], references: [id], onDelete: SetNull)
 
-  @@unique([platform, handle])
+  @@unique([creatorId, platform])
+  @@unique([platform, platformUserId])
   @@index([creatorId])
   @@index([followerCount])
   @@map("creator_social_accounts")

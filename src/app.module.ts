@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { BrandsModule } from './brands/brands.module';
 import { CreatorsModule } from './creators/creators.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { SocialConnectionsModule } from './social-connections/social-connections.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     CreatorsModule,
     BrandsModule,
+    SocialConnectionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

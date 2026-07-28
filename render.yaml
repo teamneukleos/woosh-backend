@@ -35,3 +35,16 @@ services:
         sync: false
       - key: PASSWORD_RESET_EXPIRES_MINUTES
         value: "30"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Example: https://kreate-api-staging.onrender.com/creators/social/youtube/callback
+      - key: GOOGLE_YOUTUBE_REDIRECT_URI
+        sync: false
+      - key: SOCIAL_OAUTH_FRONTEND_REDIRECT_URL
+        sync: false
+      - key: SOCIAL_OAUTH_STATE_SECRET
+        generateValue: true
+      - key: SOCIAL_TOKEN_ENCRYPTION_KEY
+        generateValue: true
