@@ -1,0 +1,146 @@
+// ─── Marketplace ────────────────────────────────────────────────────────────
+// Brand publishes a Brief. Creators arrive via open apply or BriefInvitation.
+// Application holds the pipeline. Offer is the structured counter chain.
+// Accept (fund-before-select) creates Campaign + CampaignParticipant + obligation.
+
+enum BriefStatus {
+  DRAFT
+  PENDING_MODERATION
+  OPEN
+  SELECTING
+  CLOSED
+  CANCELLED
+}
+
+enum BriefDistribution {
+  OPEN
+  INVITE_ONLY
+  HYBRID
+}
+
+enum RateMode {
+  FIXED_NON_NEGOTIABLE
+  FIXED_NEGOTIABLE
+  RANGE_NEGOTIABLE
+  DELIVERABLE_BASED
+  CREATOR_BUNDLE
+}
+
+model Brief {
+  id                  String            @id @default(cuid())
+  brandId             String
+  title               String
+  internalReference   String?
+  objective           String?
+  description         String
+  category            String?
+  status              BriefStatus       @default(DRAFT)
+  distribution        BriefDistribution @default(OPEN)
+  rateMode            RateMode          @default(FIXED_NON_NEGOTIABLE)
+  rateAmount          Decimal?          @db.Decimal(12, 2)
+  rateMin             Decimal?          @db.Decimal(12, 2)
+  rateMax             Decimal?          @db.Decimal(12, 2)
+  currency            String            @default("NGN")
+  channels            SocialChannel[]
+  eligibility         Json?
+  deliverables        Json?
+  rights              Json?
+  timing              Json?
+  screeningQuestions  Json?
+  applicationDeadline DateTime?
+  maxCreators         Int?
+  publishedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  brand        Brand             @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  invitations  BriefInvitation[]
+  applications Application[]
+  campaigns    Campaign[]
+
+  @@index([brandId, status])
+}
+
+enum InvitationStatus {
+  SENT
+  VIEWED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+model BriefInvitation {
+  id               String           @id @default(cuid())
+  briefId          String
+  creatorProfileId String
+  status           InvitationStatus @default(SENT)
+  message          String?
+  viewedAt         DateTime?
+  respondedAt      DateTime?
+  responseReason   String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  brief   Brief          @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  creator CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([briefId, creatorProfileId])
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SHORTLISTED
+  DECLINED
+  ACCEPTED
+  WITHDRAWN
+}
+
+model Application {
+  id               String            @id @default(cuid())
+  briefId          String
+  creatorProfileId String
+  status           ApplicationStatus @default(APPLIED)
+  answers          Json?
+  availabilityNote String?
+  proposedRate     Decimal?          @db.Decimal(12, 2)
+  currency         String            @default("NGN")
+  withdrawnAt      DateTime?
+  withdrawalReason String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  brief        Brief          @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  creator      CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  offers       Offer[]
+  conversation Conversation?
+
+  @@unique([briefId, creatorProfileId])
+}
+
+enum OfferStatus {
+  OPEN
+  COUNTERED
+  AGREED
+  EXPIRED
+  WITHDRAWN
+  SUPERSEDED
+}
+
+model Offer {
+  id              String      @id @default(cuid())
+  applicationId   String
+  amount          Decimal     @db.Decimal(12, 2)
+  currency        String      @default("NGN")
+  message         String?
+  status          OfferStatus @default(OPEN)
+  createdById     String
+  previousOfferId String?
+  createdAt       DateTime    @default(now())
+
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  createdBy     User        @relation("OfferAuthor", fields: [createdById], references: [id])
+  previousOffer Offer?      @relation("OfferChain", fields: [previousOfferId], references: [id], onDelete: SetNull)
+  nextOffers    Offer[]     @relation("OfferChain")
+
+  @@index([applicationId, createdAt])
+}

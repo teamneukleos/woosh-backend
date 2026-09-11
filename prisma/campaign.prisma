@@ -1,0 +1,115 @@
+// ─── Campaign operations ────────────────────────────────────────────────────
+// Created when a brand accepts a creator. One Campaign per brief hire batch;
+// each hired creator is a CampaignParticipant with a locked agreedRate.
+// The campaign thread and deliverables hang off this workspace.
+
+enum CampaignStatus {
+  ACTIVE
+  AWAITING_APPROVAL
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id        String         @id @default(cuid())
+  briefId   String
+  brandId   String
+  title     String
+  status    CampaignStatus @default(ACTIVE)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  brief         Brief                 @relation(fields: [briefId], references: [id])
+  brand         Brand                 @relation(fields: [brandId], references: [id])
+  participants  CampaignParticipant[]
+  deliverables  Deliverable[]
+  conversations Conversation[]
+  metrics       CampaignMetric[]
+  disputes      Dispute[]
+}
+
+enum ParticipantStatus {
+  ACTIVE
+  COMPLETED
+  TERMINATED
+}
+
+model CampaignParticipant {
+  id               String            @id @default(cuid())
+  campaignId       String
+  creatorProfileId String
+  agreedRate       Decimal           @db.Decimal(12, 2)
+  currency         String            @default("NGN")
+  status           ParticipantStatus @default(ACTIVE)
+  termsAcceptedAt  DateTime?
+  createdAt        DateTime          @default(now())
+
+  campaign     Campaign             @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator      CreatorProfile       @relation(fields: [creatorProfileId], references: [id])
+  obligations  PaymentObligation[]
+  deliverables Deliverable[]
+
+  @@unique([campaignId, creatorProfileId])
+}
+
+enum DeliverableState {
+  NOT_STARTED
+  IN_PROGRESS
+  DRAFT_SUBMITTED
+  REVISION_REQUESTED
+  RESUBMITTED
+  APPROVED
+  SCHEDULED
+  LIVE
+  COMPLETED
+  REJECTED
+}
+
+model Deliverable {
+  id                    String           @id @default(cuid())
+  campaignId            String
+  campaignParticipantId String
+  title                 String
+  channel               SocialChannel?
+  requirements          Json?
+  dueAt                 DateTime?
+  state                 DeliverableState @default(NOT_STARTED)
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  campaign    Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  participant CampaignParticipant @relation(fields: [campaignParticipantId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  metrics     CampaignMetric[]
+
+  @@index([campaignParticipantId, state, dueAt])
+}
+
+model Submission {
+  id             String   @id @default(cuid())
+  deliverableId  String
+  version        Int
+  submittedById  String?
+  draftUrl       String?
+  liveUrl        String?
+  storageKey     String?
+  fileName       String?
+  mimeType       String?
+  fileSizeBytes  Int?
+  idempotencyKey String?  @unique
+  notes          String?
+  reviewNotes    String?
+  submittedAt    DateTime @default(now())
+  reviewedAt     DateTime?
+
+  deliverable Deliverable      @relation(fields: [deliverableId], references: [id], onDelete: Cascade)
+  submittedBy User?            @relation("SubmissionAuthor", fields: [submittedById], references: [id], onDelete: SetNull)
+  metrics     CampaignMetric[]
+
+  @@unique([deliverableId, version])
+  @@index([submittedById, submittedAt])
+}

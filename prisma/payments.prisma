@@ -1,0 +1,189 @@
+// ─── Payments & ledger ──────────────────────────────────────────────────────
+// BrandWallet is per Brand (agency clients never share a ledger).
+// Accept commits PaymentObligation from that wallet (platformFee = 0).
+// Approve → 72h hold (availableAt) → Paystack payout to CreatorPayoutAccount.
+// Woosh owns obligation + ledger; Paystack is the rail.
+
+enum ObligationStatus {
+  PENDING_FUNDING
+  FUNDED
+  COMMITTED
+  APPROVED
+  PROCESSING
+  PAID
+  FAILED
+  REVERSED
+  DISPUTED
+}
+
+enum TransactionType {
+  COLLECTION
+  FEE
+  PAYOUT
+  REFUND
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REVERSED
+}
+
+model BrandWallet {
+  id        String   @id @default(cuid())
+  brandId   String   @unique
+  balance   Decimal  @default(0) @db.Decimal(14, 2)
+  currency  String   @default("NGN")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+}
+
+model CreatorPayoutAccount {
+  id                      String    @id @default(cuid())
+  creatorProfileId        String    @unique
+  bankCode                String
+  accountNumber           String?
+  encryptedAccountNumber  String?
+  accountNumberLast4      String?
+  accountName             String?
+  bankName                String?
+  recipientCode           String?
+  verifiedAt              DateTime?
+  verificationReference   String?
+  currency                String    @default("NGN")
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  creator CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+}
+
+model PaymentObligation {
+  id                    String           @id @default(cuid())
+  campaignParticipantId String
+  grossAmount           Decimal          @db.Decimal(12, 2)
+  platformFee           Decimal          @default(0) @db.Decimal(12, 2)
+  netAmount             Decimal          @db.Decimal(12, 2)
+  currency              String           @default("NGN")
+  status                ObligationStatus @default(PENDING_FUNDING)
+  approvedAt            DateTime?
+  availableAt           DateTime?
+  processingAt          DateTime?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  reversedAt            DateTime?
+  failureReason         String?
+  reversalReason        String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  participant        CampaignParticipant @relation(fields: [campaignParticipantId], references: [id])
+  transactions       LedgerTransaction[]
+  disputes           Dispute[]
+  financialDocuments FinancialDocument[]
+
+  @@unique([campaignParticipantId])
+  @@index([status, availableAt])
+}
+
+model LedgerTransaction {
+  id                String            @id @default(cuid())
+  obligationId      String?
+  type              TransactionType
+  amount            Decimal           @db.Decimal(12, 2)
+  currency          String            @default("NGN")
+  status            TransactionStatus @default(PENDING)
+  provider          String            @default("paystack")
+  providerReference String?
+  idempotencyKey    String            @unique
+  metadata          Json?
+  failureReason     String?
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  obligation PaymentObligation? @relation(fields: [obligationId], references: [id])
+
+  @@index([providerReference])
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum DisputeCategory {
+  CONTENT_APPROVAL
+  PAYMENT_AMOUNT
+  PAYOUT_DELAY
+  CANCELLATION
+  OTHER
+}
+
+enum DisputeResolutionType {
+  RELEASE_PAYOUT
+  REFUND_BRAND
+}
+
+model Dispute {
+  id                  String                  @id @default(cuid())
+  raisedById          String
+  resolvedById        String?
+  obligationId        String
+  campaignId          String
+  category            DisputeCategory
+  subject             String
+  description         String
+  requestedResolution String?
+  status              DisputeStatus           @default(OPEN)
+  evidence            Json?
+  resolution          String?
+  resolutionType      DisputeResolutionType?
+  responseDueAt       DateTime?
+  resolvedAt          DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  raisedBy   User              @relation("DisputeRaiser", fields: [raisedById], references: [id])
+  resolvedBy User?             @relation("DisputeResolver", fields: [resolvedById], references: [id])
+  obligation PaymentObligation @relation(fields: [obligationId], references: [id], onDelete: Cascade)
+  campaign   Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([obligationId, status])
+  @@index([status, responseDueAt])
+}
+
+enum FinancialDocumentType {
+  CREATOR_STATEMENT
+  BRAND_RECEIPT
+}
+
+model FinancialDocument {
+  id               String                 @id @default(cuid())
+  documentNumber   String                 @unique
+  type             FinancialDocumentType
+  creatorProfileId String?
+  brandId          String?
+  obligationId     String?
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  currency         String                 @default("NGN")
+  grossAmount      Decimal                @db.Decimal(12, 2)
+  feeAmount        Decimal                @default(0) @db.Decimal(12, 2)
+  netAmount        Decimal                @db.Decimal(12, 2)
+  snapshot         Json
+  dedupeKey        String                 @unique
+  generatedAt      DateTime               @default(now())
+
+  creator    CreatorProfile?    @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  brand      Brand?             @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  obligation PaymentObligation? @relation(fields: [obligationId], references: [id], onDelete: SetNull)
+
+  @@index([creatorProfileId, generatedAt])
+  @@index([brandId, generatedAt])
+}

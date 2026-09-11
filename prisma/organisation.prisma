@@ -1,0 +1,169 @@
+// ─── Organisation & Brand ───────────────────────────────────────────────────
+// Brand seat  = Organisation(BRAND) + exactly one Brand + one BrandWallet.
+// Agency seat = Organisation(AGENCY) + many Brands, each with its own wallet.
+// Money never crosses Brand rows. The agency switcher only changes brandId.
+//
+// Membership is org-wide RBAC. BrandMembership is per-client access.
+
+enum OrganisationType {
+  BRAND
+  AGENCY
+  PLATFORM
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MANAGER
+  FINANCE
+  VIEWER
+  ACCOUNT_MANAGER
+}
+
+model Organisation {
+  id         String           @id @default(cuid())
+  type       OrganisationType
+  legalName  String
+  publicName String
+  country    String           @default("NG")
+  industry   String?
+  website    String?
+  logoUrl    String?
+  verifiedAt DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  memberships  Membership[]
+  brands       Brand[]
+  creatorLists CreatorList[]
+  teamInvites  TeamInvite[]
+  subscription OrganisationSubscription?
+}
+
+model Membership {
+  id                 String         @id @default(cuid())
+  organisationId     String
+  userId             String
+  role               MembershipRole
+  canApprovePayments Boolean        @default(false)
+  canEditRates       Boolean        @default(false)
+  canManageTeam      Boolean        @default(false)
+  canExportData      Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, userId])
+}
+
+/// The commercial tenant. Briefs, campaigns, conversations and wallets hang here.
+model Brand {
+  id              String   @id @default(cuid())
+  organisationId  String
+  name            String
+  logoUrl         String?
+  industry        String?
+  country         String   @default("NG")
+  clientHasAccess Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organisation       Organisation        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  memberships        BrandMembership[]
+  briefs             Brief[]
+  campaigns          Campaign[]
+  creatorListLinks   CreatorListBrand[]
+  interests          BrandInterest[]
+  conversations      Conversation[]
+  wallet             BrandWallet?
+  financialDocuments FinancialDocument[]
+}
+
+/// Org member scoped to one client brand (agency roster / brand-seat owner).
+model BrandMembership {
+  id        String         @id @default(cuid())
+  brandId   String
+  userId    String
+  role      MembershipRole
+  createdAt DateTime       @default(now())
+
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([brandId, userId])
+}
+
+model TeamInvite {
+  id             String         @id @default(cuid())
+  organisationId String
+  email          String
+  role           MembershipRole @default(MANAGER)
+  token          String         @unique
+  invitedById    String
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime       @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("TeamInviteSender", fields: [invitedById], references: [id])
+
+  @@index([email])
+  @@index([organisationId])
+}
+
+// ─── Seat billing (0% of creator rate; brands/agencies pay for brief volume) ─
+
+enum PlanAudience {
+  BRAND
+  AGENCY
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+model Plan {
+  id               String       @id @default(cuid())
+  audience         PlanAudience
+  slug             String       @unique
+  name             String
+  monthlyAmount    Decimal      @db.Decimal(12, 2)
+  currency         String       @default("NGN")
+  briefsPerMonth   Int
+  clientBrandLimit Int          @default(1)
+  seatLimit        Int          @default(1)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  subscriptions OrganisationSubscription[]
+}
+
+model OrganisationSubscription {
+  id                   String             @id @default(cuid())
+  organisationId       String             @unique
+  planId               String
+  status               SubscriptionStatus @default(TRIALING)
+  billingCycle         BillingCycle       @default(MONTHLY)
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  briefsUsedThisPeriod Int                @default(0)
+  provider             String             @default("paystack")
+  providerReference    String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id])
+
+  @@index([status, currentPeriodEnd])
+}

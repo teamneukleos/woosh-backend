@@ -1,0 +1,25 @@
+// Woosh API — PostgreSQL schema (Prisma 6.7).
+// Sibling .prisma files in this folder are merged.
+//
+// One loop, four seats:
+//   Creator  <->  Brand / Agency  <->  Platform admin
+//
+// Bounded contexts:
+//   identity.prisma        people who log in
+//   organisation.prisma    brand / agency tenancy + seat billing
+//   creator.prisma         supply: profiles, prospects, social proof
+//   marketplace.prisma     demand: briefs, invites, applications, offers
+//   campaign.prisma        execution after accept
+//   messaging.prisma       one thread per relationship
+//   payments.prisma        wallets, commitments, payouts, disputes
+//   platform.prisma        audit, notify, analytics, webhooks
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

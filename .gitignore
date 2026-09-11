@@ -1,0 +1,43 @@
+# compiled output
+/dist
+/node_modules
+/build
+
+# logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# tests
+/coverage
+/.nyc_output
+
+# env
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# IDE
+.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# temp
+.temp
+.tmp
+
+# local file uploads (dev without S3)
+/uploads

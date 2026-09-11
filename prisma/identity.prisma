@@ -1,0 +1,110 @@
+// ─── Identity ───────────────────────────────────────────────────────────────
+// A User is a person. Seat kind is not a column on User:
+//   creator  → has CreatorProfile
+//   brand    → Membership on Organisation(type=BRAND)
+//   agency   → Membership on Organisation(type=AGENCY)
+//   admin    → isPlatformAdmin
+// Google/Apple attach via OAuthAccount. Sessions are JWT refresh tokens.
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  email              String     @unique
+  emailVerified      DateTime?
+  phone              String?
+  phoneVerified      DateTime?
+  passwordHash       String?
+  name               String?
+  image              String?
+  status             UserStatus @default(PENDING_VERIFICATION)
+  mfaEnabled         Boolean    @default(false)
+  emailNotifications Boolean    @default(true)
+  weeklyDigest       Boolean    @default(true)
+  isPlatformAdmin    Boolean    @default(false)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  oauthAccounts           OAuthAccount[]
+  refreshTokens           RefreshToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+  memberships             Membership[]
+  brandMemberships        BrandMembership[]
+  creatorProfile          CreatorProfile?
+  auditEvents             AuditEvent[]           @relation("AuditActor")
+  brandInterestsCreated   BrandInterest[]        @relation("BrandInterestCreator")
+  submissions             Submission[]           @relation("SubmissionAuthor")
+  disputesRaised          Dispute[]              @relation("DisputeRaiser")
+  disputesResolved        Dispute[]              @relation("DisputeResolver")
+  teamInvitesSent         TeamInvite[]           @relation("TeamInviteSender")
+  offersCreated           Offer[]                @relation("OfferAuthor")
+  messagesSent            Message[]              @relation("MessageSender")
+  notifications           Notification[]
+  portfolioItemsModerated CreatorPortfolioItem[] @relation("PortfolioModerator")
+}
+
+/// Google / Apple (and later social login) identity link.
+model OAuthAccount {
+  id                String  @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  refreshToken      String? @db.Text
+  accessToken       String? @db.Text
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+/// Opaque refresh token for NestJS JWT auth. Access tokens stay stateless.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

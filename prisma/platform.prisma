@@ -1,0 +1,117 @@
+// ─── Analytics, trust, audit ────────────────────────────────────────────────
+
+model CampaignMetric {
+  id               String   @id @default(cuid())
+  campaignId       String
+  creatorProfileId String?
+  deliverableId    String?
+  submissionId     String?
+  postUrl          String?
+  capturedAt       DateTime @default(now())
+  source           String
+  reach            Int?
+  impressions      Int?
+  views            Int?
+  engagement       Int?
+  raw              Json?
+
+  campaign    Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator     CreatorProfile? @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  deliverable Deliverable?    @relation(fields: [deliverableId], references: [id], onDelete: SetNull)
+  submission  Submission?     @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, capturedAt])
+  @@index([creatorProfileId, capturedAt])
+  @@index([deliverableId, capturedAt])
+}
+
+enum AnalyticsEventType {
+  PROFILE_VIEW
+  CREATOR_SAVED
+  CREATOR_UNSAVED
+  INVITE_SENT
+  INVITE_VIEWED
+  INVITE_ACCEPTED
+  INVITE_DECLINED
+  APPLICATION_SUBMITTED
+  APPLICATION_SHORTLISTED
+  APPLICATION_ACCEPTED
+  APPLICATION_DECLINED
+  APPLICATION_WITHDRAWN
+  OFFER_COUNTERED
+  TERMS_ACCEPTED
+  DELIVERABLE_SUBMITTED
+  REVISION_REQUESTED
+  CAMPAIGN_STARTED
+  DELIVERABLE_APPROVED
+  CONTENT_LIVE
+  CAMPAIGN_COMPLETED
+}
+
+model AnalyticsEvent {
+  id               String             @id @default(cuid())
+  eventType        AnalyticsEventType
+  actorUserId      String?
+  organisationId   String?
+  brandId          String?
+  creatorProfileId String?
+  briefId          String?
+  campaignId       String?
+  metadata         Json?
+  createdAt        DateTime           @default(now())
+
+  @@index([creatorProfileId, eventType, createdAt])
+  @@index([brandId, eventType, createdAt])
+  @@index([campaignId, eventType, createdAt])
+}
+
+model ProviderWebhookEvent {
+  id                  String    @id @default(cuid())
+  provider            String
+  eventKey            String    @unique
+  eventType           String
+  reference           String?
+  payload             Json
+  signature           String?
+  processedAt         DateTime?
+  processingStartedAt DateTime?
+  error               String?
+  createdAt           DateTime  @default(now())
+
+  @@index([provider, reference])
+  @@index([processedAt])
+  @@index([processingStartedAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String
+  before     Json?
+  after      Json?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  href      String?
+  dedupeKey String?   @unique
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}

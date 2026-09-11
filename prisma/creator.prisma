@@ -1,0 +1,288 @@
+// ─── Creator supply ─────────────────────────────────────────────────────────
+// Two kinds of supply live in discovery:
+//   CreatorProfile   claimed user who connected Instagram / TikTok / YouTube
+//   CreatorProspect  unclaimed handle a brand added; labelled until claimed
+//
+// BrandInterest is the claim invite: brand → prospect (or profile) with a token.
+// Follower counts never live on the profile as typed numbers — only snapshots
+// from SocialAccount after OAuth.
+
+enum SocialChannel {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+}
+
+enum SocialConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  PENDING
+}
+
+enum CreatorMarketplaceStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  SUSPENDED
+}
+
+enum CreatorMediaStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REMOVED
+}
+
+enum PortfolioMediaType {
+  IMAGE
+  VIDEO
+  EMBED
+}
+
+model CreatorProfile {
+  id                  String                   @id @default(cuid())
+  userId              String                   @unique
+  displayName         String
+  bio                 String?
+  avatarUrl           String?
+  avatarStorageKey    String?
+  avatarStatus        CreatorMediaStatus       @default(PENDING)
+  coverUrl            String?
+  coverStorageKey     String?
+  coverStatus         CreatorMediaStatus       @default(PENDING)
+  websiteUrl          String?
+  locationCountry     String?
+  locationState       String?
+  locationCity        String?
+  ageBand             String?
+  gender              String?
+  genderSearchable    Boolean                  @default(false)
+  ageSearchable       Boolean                  @default(false)
+  languages           String[]                 @default([])
+  categories          String[]                 @default([])
+  preferredIndustries String[]                 @default([])
+  excludedIndustries  String[]                 @default([])
+  typicalRateMin      Decimal?                 @db.Decimal(12, 2)
+  typicalRateMax      Decimal?                 @db.Decimal(12, 2)
+  rateCurrency        String                   @default("NGN")
+  availabilityNotes   String?
+  profileVisible      Boolean                  @default(false)
+  marketplaceStatus   CreatorMarketplaceStatus @default(DRAFT)
+  moderationNotes     String?
+  submittedAt         DateTime?
+  verifiedAt          DateTime?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialAccounts     SocialAccount[]
+  invitations        BriefInvitation[]
+  applications       Application[]
+  participants       CampaignParticipant[]
+  listItems          CreatorListItem[]
+  claimedFrom        CreatorProspect?
+  brandInterests     BrandInterest[]
+  conversations      Conversation[]
+  payoutAccount      CreatorPayoutAccount?
+  portfolioItems     CreatorPortfolioItem[]
+  ratePackages       CreatorRatePackage[]
+  campaignMetrics    CampaignMetric[]
+  financialDocuments FinancialDocument[]
+}
+
+model CreatorPortfolioItem {
+  id                  String             @id @default(cuid())
+  creatorProfileId    String
+  mediaType           PortfolioMediaType
+  title               String
+  description         String?
+  channel             SocialChannel?
+  campaignType        String?
+  brandName           String?
+  tags                String[]           @default([])
+  url                 String
+  storageKey          String?
+  thumbnailUrl        String?
+  thumbnailStorageKey String?
+  mimeType            String?
+  fileSizeBytes       Int?
+  width               Int?
+  height              Int?
+  durationSeconds     Int?
+  sortOrder           Int                @default(0)
+  status              CreatorMediaStatus @default(PENDING)
+  moderationNotes     String?
+  moderatedAt         DateTime?
+  moderatedById       String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  creator     CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  moderatedBy User?          @relation("PortfolioModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+
+  @@index([creatorProfileId, status, sortOrder])
+}
+
+/// Packaged offer a brief can inherit (channel + deliverable + price + rights).
+model CreatorRatePackage {
+  id               String        @id @default(cuid())
+  creatorProfileId String
+  channel          SocialChannel
+  deliverableType  String
+  title            String
+  description      String?
+  price            Decimal       @db.Decimal(12, 2)
+  currency         String        @default("NGN")
+  turnaroundDays   Int?
+  revisions        Int           @default(1)
+  usageRights      String?
+  sortOrder        Int           @default(0)
+  active           Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  creator CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+
+  @@index([creatorProfileId, active, sortOrder])
+}
+
+enum ProspectStatus {
+  UNCLAIMED
+  CLAIM_PENDING
+  CLAIMED
+}
+
+/// Handle a brand found off-platform. Unique per channel+handle.
+model CreatorProspect {
+  id               String         @id @default(cuid())
+  channel          SocialChannel
+  handle           String
+  displayName      String?
+  locationCountry  String?
+  locationCity     String?
+  categories       String[]       @default([])
+  followerEstimate Int?
+  contactEmail     String?
+  contactPhone     String?
+  status           ProspectStatus @default(UNCLAIMED)
+  claimedProfileId String?        @unique
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  claimedProfile CreatorProfile?   @relation(fields: [claimedProfileId], references: [id])
+  interests      BrandInterest[]
+  listItems      CreatorListItem[]
+
+  @@unique([channel, handle])
+  @@index([status])
+}
+
+enum BrandInterestStatus {
+  OPEN
+  INVITED
+  CLAIMED
+  CLOSED
+}
+
+/// Brand → prospect claim invite. Token lands on /claim/[token].
+model BrandInterest {
+  id                  String              @id @default(cuid())
+  brandId             String
+  prospectId          String?
+  creatorProfileId    String?
+  message             String?
+  status              BrandInterestStatus @default(OPEN)
+  claimToken          String              @unique
+  claimTokenExpiresAt DateTime
+  createdById         String
+  createdAt           DateTime            @default(now())
+
+  brand          Brand            @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  prospect       CreatorProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  creatorProfile CreatorProfile?  @relation(fields: [creatorProfileId], references: [id], onDelete: SetNull)
+  createdBy      User             @relation("BrandInterestCreator", fields: [createdById], references: [id])
+
+  @@index([brandId, status])
+  @@index([prospectId])
+}
+
+model SocialAccount {
+  id               String                 @id @default(cuid())
+  creatorProfileId String
+  channel          SocialChannel
+  externalId       String
+  handle           String
+  status           SocialConnectionStatus @default(PENDING)
+  accessTokenEnc   String?                @db.Text
+  refreshTokenEnc  String?                @db.Text
+  tokenExpiresAt   DateTime?
+  lastRefreshedAt  DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  creatorProfile CreatorProfile         @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  snapshots      SocialMetricSnapshot[]
+
+  @@unique([channel, externalId])
+  @@index([creatorProfileId, channel])
+}
+
+/// Provider-sourced metrics only. UI must show source + capturedAt.
+model SocialMetricSnapshot {
+  id               String   @id @default(cuid())
+  socialAccountId  String
+  capturedAt       DateTime @default(now())
+  source           String
+  followers        Int?
+  engagementRate   Decimal? @db.Decimal(8, 4)
+  averageViews     Int?
+  postingFrequency Decimal? @db.Decimal(8, 2)
+  audienceGeo      Json?
+  audienceAge      Json?
+  audienceGender   Json?
+  topContent       Json?
+  raw              Json?
+
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@index([socialAccountId, capturedAt])
+}
+
+/// Saved roster (claimed profiles and/or unclaimed prospects).
+model CreatorList {
+  id             String   @id @default(cuid())
+  organisationId String
+  name           String
+  createdAt      DateTime @default(now())
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  items        CreatorListItem[]
+  brandLinks   CreatorListBrand[]
+}
+
+model CreatorListItem {
+  id               String   @id @default(cuid())
+  listId           String
+  creatorProfileId String?
+  prospectId       String?
+  createdAt        DateTime @default(now())
+
+  list     CreatorList      @relation(fields: [listId], references: [id], onDelete: Cascade)
+  creator  CreatorProfile?  @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  prospect CreatorProspect? @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, creatorProfileId])
+  @@unique([listId, prospectId])
+}
+
+model CreatorListBrand {
+  listId  String
+  brandId String
+
+  list  CreatorList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  brand Brand       @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@id([listId, brandId])
+}

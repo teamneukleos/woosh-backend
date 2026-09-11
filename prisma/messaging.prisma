@@ -1,0 +1,49 @@
+// ─── Messaging ──────────────────────────────────────────────────────────────
+// One Conversation per relationship:
+//   APPLICATION  → tied 1:1 to an Application (pre-hire)
+//   CAMPAIGN     → the campaign thread (post-accept)
+//   INVITATION / SUPPORT as needed
+// Contact stays in-platform; rates live on Offer, not free-text.
+
+enum ConversationType {
+  APPLICATION
+  INVITATION
+  CAMPAIGN
+  SUPPORT
+}
+
+model Conversation {
+  id               String           @id @default(cuid())
+  type             ConversationType
+  applicationId    String?          @unique
+  campaignId       String?
+  brandId          String?
+  creatorProfileId String?
+  createdAt        DateTime         @default(now())
+
+  application Application?    @relation(fields: [applicationId], references: [id])
+  campaign    Campaign?       @relation(fields: [campaignId], references: [id])
+  brand       Brand?          @relation(fields: [brandId], references: [id])
+  creator     CreatorProfile? @relation(fields: [creatorProfileId], references: [id])
+  messages    Message[]
+
+  @@index([campaignId, creatorProfileId])
+  @@index([brandId, creatorProfileId])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderUserId   String?
+  body           String?
+  attachments    Json?
+  isSystem       Boolean   @default(false)
+  offerId        String?
+  createdAt      DateTime  @default(now())
+  readAt         DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?        @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+}
