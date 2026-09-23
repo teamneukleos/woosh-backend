@@ -4,10 +4,14 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
   ValidateIf,
 } from 'class-validator';
+
+const PASSWORD_COMPLEXITY =
+  /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,128}$/;
 
 export const ACCOUNT_TYPES = ['creator', 'brand', 'agency'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
@@ -23,10 +27,19 @@ export class RegisterDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ example: 'password123', minLength: 8 })
+  @ApiProperty({
+    example: 'Password1!',
+    minLength: 8,
+    description:
+      '8–128 characters with an uppercase letter, a number, and a special character.',
+  })
   @IsString()
   @MinLength(8)
   @MaxLength(128)
+  @Matches(PASSWORD_COMPLEXITY, {
+    message:
+      'Password must include an uppercase letter, a number, and a special character.',
+  })
   password!: string;
 
   @ApiPropertyOptional({
