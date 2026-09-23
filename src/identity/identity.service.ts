@@ -485,7 +485,7 @@ export class IdentityService {
     });
     const message = verifyEmailMessage(
       this.mail.frontendUrl(
-        `/api/auth/verify-email?token=${raw}&email=${encodeURIComponent(email)}`,
+        `/verify-email?token=${encodeURIComponent(raw)}&email=${encodeURIComponent(email)}`,
       ),
     );
     await this.mail.sendBestEffort({ ...message, to: email });

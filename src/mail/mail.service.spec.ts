@@ -77,4 +77,14 @@ describe('MailService', () => {
       ),
     ).toBe('http://localhost:3000/login?reset=abc');
   });
+
+  it('adds https to a host-only FRONTEND_URL', () => {
+    expect(
+      service({
+        FRONTEND_URL: 'woosh-frontend-staging.vercel.app',
+      }).frontendUrl('/verify-email?token=abc'),
+    ).toBe(
+      'https://woosh-frontend-staging.vercel.app/verify-email?token=abc',
+    );
+  });
 });

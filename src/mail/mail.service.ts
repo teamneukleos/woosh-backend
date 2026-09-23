@@ -4,6 +4,21 @@ import type { MailPayload } from './templates';
 
 const RESEND_URL = 'https://api.resend.com/emails';
 
+/** Host-only FRONTEND_URL (no scheme) becomes https:// except localhost. */
+export function withHttpOrigin(value: string | undefined) {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return 'http://localhost:3000';
+  const withoutSlash = trimmed.replace(/\/$/, '');
+  if (/^https?:\/\//i.test(withoutSlash)) return withoutSlash;
+  if (
+    withoutSlash.startsWith('localhost') ||
+    withoutSlash.startsWith('127.0.0.1')
+  ) {
+    return `http://${withoutSlash}`;
+  }
+  return `https://${withoutSlash}`;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -15,9 +30,8 @@ export class MailService {
   }
 
   frontendUrl(path: string) {
-    const base =
-      this.config.get<string>('FRONTEND_URL')?.replace(/\/$/, '') ??
-      'http://localhost:3000';
+    const raw = this.config.get<string>('FRONTEND_URL')?.trim();
+    const base = withHttpOrigin(raw);
     return `${base}${path.startsWith('/') ? path : `/${path}`}`;
   }
 
