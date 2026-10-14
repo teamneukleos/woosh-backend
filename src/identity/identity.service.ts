@@ -15,7 +15,8 @@ import { resetPasswordMessage, verifyEmailMessage } from '../mail/templates';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AccountType } from './dto/register.dto';
 
-const ACCESS_EXPIRES = '15m';
+const ACCESS_SECONDS = 8 * 60 * 60;
+const ACCESS_EXPIRES = `${ACCESS_SECONDS}s`;
 const REFRESH_DAYS = 7;
 const VERIFY_HOURS = 24;
 const RESET_HOURS = 1;
@@ -214,12 +215,22 @@ export class IdentityService {
       throw new UnauthorizedException('Invalid refresh token.');
     }
 
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + REFRESH_DAYS);
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
-      data: { revokedAt: new Date() },
+      data: { expiresAt },
     });
 
-    return this.issueSession(stored.user.id, stored.user.email);
+    return {
+      accessToken: await this.issueAccessToken(
+        stored.user.id,
+        stored.user.email,
+      ),
+      refreshToken: rawRefreshToken,
+      tokenType: 'Bearer' as const,
+      expiresIn: ACCESS_SECONDS,
+    };
   }
 
   async logout(rawRefreshToken: string) {
@@ -444,15 +455,17 @@ export class IdentityService {
     };
   }
 
-  private async issueSession(userId: string, email: string) {
-    const accessToken = await this.jwt.signAsync(
+  private async issueAccessToken(userId: string, email: string) {
+    return this.jwt.signAsync(
       { sub: userId, email },
       {
         secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
         expiresIn: ACCESS_EXPIRES,
       },
     );
+  }
 
+  private async issueSession(userId: string, email: string) {
     const rawRefresh = newOpaqueToken();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + REFRESH_DAYS);
@@ -465,10 +478,10 @@ export class IdentityService {
     });
 
     return {
-      accessToken,
+      accessToken: await this.issueAccessToken(userId, email),
       refreshToken: rawRefresh,
-      tokenType: 'Bearer',
-      expiresIn: 15 * 60,
+      tokenType: 'Bearer' as const,
+      expiresIn: ACCESS_SECONDS,
     };
   }
 

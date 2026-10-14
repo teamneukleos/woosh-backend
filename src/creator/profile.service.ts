@@ -22,28 +22,39 @@ export class CreatorProfileService {
   }
 
   async updateMine(creatorProfileId: string, userId: string, input: UpdateCreatorProfileDto) {
-    await this.prisma.creatorProfile.update({
-      where: { id: creatorProfileId },
-      data: {
-        displayName: input.displayName.trim(),
-        bio: input.bio,
-        websiteUrl: input.websiteUrl,
-        locationCountry: input.locationCountry,
-        locationState: input.locationState,
-        locationCity: input.locationCity,
-        categories: input.categories,
-        languages: input.languages,
-        preferredIndustries: input.preferredIndustries,
-        excludedIndustries: input.excludedIndustries,
-        ageBand: input.ageBand,
-        gender: input.gender,
-        ageSearchable: input.ageSearchable,
-        genderSearchable: input.genderSearchable,
-        typicalRateMin: input.typicalRateMin,
-        typicalRateMax: input.typicalRateMax,
-        rateCurrency: input.rateCurrency,
-        availabilityNotes: input.availabilityNotes,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.creatorProfile.update({
+        where: { id: creatorProfileId },
+        data: {
+          displayName: input.displayName.trim(),
+          bio: input.bio,
+          websiteUrl: input.websiteUrl,
+          locationCountry: input.locationCountry,
+          locationState: input.locationState,
+          locationCity: input.locationCity,
+          categories: input.categories,
+          languages: input.languages,
+          preferredIndustries: input.preferredIndustries,
+          excludedIndustries: input.excludedIndustries,
+          ageBand: input.ageBand,
+          gender: input.gender,
+          ageSearchable: input.ageSearchable,
+          genderSearchable: input.genderSearchable,
+          typicalRateMin: input.typicalRateMin,
+          typicalRateMax: input.typicalRateMax,
+          rateCurrency: input.rateCurrency,
+          availabilityNotes: input.availabilityNotes,
+        },
+      });
+      if (input.phone !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            phone: input.phone?.trim() || null,
+            phoneVerified: null,
+          },
+        });
+      }
     });
     await this.prisma.auditEvent.create({
       data: {
@@ -212,7 +223,7 @@ export class CreatorProfileService {
     const profile = await this.prisma.creatorProfile.findUnique({
       where: { id: creatorProfileId },
       include: {
-        user: { select: { emailVerified: true } },
+        user: { select: { emailVerified: true, phone: true } },
         socialAccounts: {
           include: {
             snapshots: { orderBy: { capturedAt: 'desc' as const }, take: 1 },
@@ -234,6 +245,7 @@ export class CreatorProfileService {
       displayName: profile.displayName,
       bio: profile.bio,
       websiteUrl: profile.websiteUrl,
+      phone: profile.user.phone,
       locationCountry: profile.locationCountry,
       locationState: profile.locationState,
       locationCity: profile.locationCity,

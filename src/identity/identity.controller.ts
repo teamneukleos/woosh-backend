@@ -37,7 +37,7 @@ export class IdentityController {
   }
 
   @Post('refresh')
-  @ApiOperation({ summary: 'Rotate refresh token and issue a new access token' })
+  @ApiOperation({ summary: 'Issue a new access token from a still-valid refresh token' })
   refresh(@Body() body: RefreshDto) {
     return this.identity.refresh(body.refreshToken);
   }
