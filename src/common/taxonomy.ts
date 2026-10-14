@@ -17,6 +17,7 @@ export const CREATOR_CATEGORIES = [
   'Home & DIY',
   'Business',
   'News & Culture',
+  'Others',
 ] as const;
 
 export type CreatorCategory = (typeof CREATOR_CATEGORIES)[number];

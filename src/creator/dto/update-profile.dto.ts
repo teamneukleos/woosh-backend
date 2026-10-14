@@ -39,6 +39,18 @@ export class UpdateCreatorProfileDto {
   @MaxLength(2048)
   websiteUrl?: string;
 
+  @ApiPropertyOptional({
+    example: '+2348012345678',
+    description: 'Private contact number. Not shown on the public creator profile.',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' && !value.trim() ? null : value,
+  )
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string | null;
+
   @ApiPropertyOptional({ example: 'NG' })
   @IsOptional()
   @IsString()
