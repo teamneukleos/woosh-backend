@@ -32,12 +32,18 @@ enum TransactionStatus {
 }
 
 model BrandWallet {
-  id        String   @id @default(cuid())
-  brandId   String   @unique
-  balance   Decimal  @default(0) @db.Decimal(14, 2)
-  currency  String   @default("NGN")
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  id                         String    @id @default(cuid())
+  brandId                    String    @unique
+  balance                    Decimal   @default(0) @db.Decimal(14, 2)
+  currency                   String    @default("NGN")
+  paystackCustomerCode       String?   @unique
+  dvaAccountName             String?
+  dvaBankName                String?
+  encryptedDvaAccountNumber  String?
+  dvaAccountNumberLast4      String?
+  dvaAssignedAt              DateTime?
+  updatedAt                  DateTime  @updatedAt
+  createdAt                  DateTime  @default(now())
 
   brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
 }

@@ -56,10 +56,12 @@ export class OrganisationService {
 
   async createBrand(ctx: WorkspaceSnapshot, input: CreateBrandDto) {
     const org = ctx.organisation!;
-    if (org.type !== OrganisationType.AGENCY && org.type !== OrganisationType.PLATFORM) {
-      throw new ForbiddenException(
-        'Brand seats have exactly one brand. Agencies add client brands here.',
-      );
+    if (
+      org.type !== OrganisationType.AGENCY &&
+      org.type !== OrganisationType.BRAND &&
+      org.type !== OrganisationType.PLATFORM
+    ) {
+      throw new ForbiddenException('This organisation cannot add brands.');
     }
 
     const brand = await this.prisma.$transaction(async (tx) => {

@@ -1,9 +1,9 @@
 // ─── Organisation & Brand ───────────────────────────────────────────────────
-// Brand seat  = Organisation(BRAND) + exactly one Brand + one BrandWallet.
+// Brand seat  = Organisation(BRAND) + one or more Brands, each with a BrandWallet.
 // Agency seat = Organisation(AGENCY) + many Brands, each with its own wallet.
-// Money never crosses Brand rows. The agency switcher only changes brandId.
+// Money never crosses Brand rows. The switcher only changes brandId.
 //
-// Membership is org-wide RBAC. BrandMembership is per-client access.
+// Membership is org-wide RBAC. BrandMembership is per-brand access.
 
 enum OrganisationType {
   BRAND

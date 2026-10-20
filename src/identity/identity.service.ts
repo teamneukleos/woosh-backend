@@ -424,6 +424,7 @@ export class IdentityService {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.phone,
       image: user.image,
       status: user.status,
       emailVerified: user.emailVerified,
