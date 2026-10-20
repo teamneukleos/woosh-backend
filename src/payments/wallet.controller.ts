@@ -5,7 +5,9 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RequirePermission } from '../organisation/decorators/require-permission.decorator';
 import { WorkspaceGuard } from '../organisation/guards/workspace.guard';
 import { WorkspaceService } from '../organisation/workspace.service';
+import { CreateDvaDto } from './dto/dva.dto';
 import { WalletTopUpDto, VerifyTopUpDto } from './dto/top-up.dto';
+import { listPaystackBanks, paystackConfigured } from './paystack.client';
 import { WalletService } from './wallet.service';
 
 @ApiTags('wallet')
@@ -74,5 +76,75 @@ export class WalletController {
     @Body() body: VerifyTopUpDto,
   ) {
     return this.wallets.completeTopUpFromPaystack(user.id, body.reference);
+  }
+
+  @Get('dva')
+  @RequirePermission('payments.approve')
+  @ApiOperation({
+    summary: 'Dedicated virtual account for this brand wallet',
+    description:
+      'One NUBAN per Brand. Created lazily on POST /wallet/dva. Null until then.',
+  })
+  async dva(
+    @CurrentUser() user: { id: string },
+    @Query('brandId') brandId?: string,
+    @Headers('x-brand-id') headerBrandId?: string,
+  ) {
+    const id = headerBrandId || brandId;
+    if (!id) throw new BadRequestException('Select a brand first (brandId or X-Brand-Id).');
+    await this.workspace.requireBrandPermission(user.id, id, 'payments.approve');
+    const wallet = await this.wallets.getBalance(id);
+    return { dva: wallet.dva };
+  }
+
+  @Post('dva')
+  @RequirePermission('payments.approve')
+  @ApiOperation({
+    summary: 'Create a dedicated NUBAN for this brand (bank transfer)',
+    description:
+      'Lazy, per Brand. Phone and legal name required. BVN is only collected if Paystack requires customer identification, and is never stored.',
+  })
+  async createDva(
+    @CurrentUser() user: { id: string; email: string },
+    @Body() body: CreateDvaDto,
+    @Query('brandId') brandId?: string,
+    @Headers('x-brand-id') headerBrandId?: string,
+  ) {
+    const id = headerBrandId || brandId;
+    if (!id) throw new BadRequestException('Select a brand first (brandId or X-Brand-Id).');
+    await this.workspace.requireBrandPermission(user.id, id, 'payments.approve');
+    return this.wallets.getOrCreateDva({
+      brandId: id,
+      actorUserId: user.id,
+      actorEmail: user.email,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      phone: body.phone,
+      consent: body.consent,
+      bvn: body.bvn,
+      accountNumber: body.accountNumber,
+      bankCode: body.bankCode,
+    });
+  }
+
+  @Get('dva-banks')
+  @RequirePermission('payments.approve')
+  @ApiOperation({ summary: 'Banks for BVN identification when Paystack requires it' })
+  async dvaBanks() {
+    if (!paystackConfigured()) {
+      return {
+        banks: [
+          { name: 'Access Bank', code: '044' },
+          { name: 'Guaranty Trust Bank', code: '058' },
+          { name: 'Zenith Bank', code: '057' },
+        ],
+      };
+    }
+    const banks = await listPaystackBanks();
+    return {
+      banks: banks
+        .filter((bank) => bank.active)
+        .map((bank) => ({ name: bank.name, code: bank.code })),
+    };
   }
 }

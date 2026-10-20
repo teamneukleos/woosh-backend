@@ -27,6 +27,20 @@ export type PaystackWebhookPayload = {
     gateway_response?: string;
     metadata?: { brandId?: string; purpose?: string };
     transfer_code?: string;
+    customer?: { customer_code?: string; email?: string };
+    authorization?: {
+      channel?: string;
+      receiver_bank_account_number?: string;
+      receiver_bank?: string;
+    };
+    dedicated_account?: {
+      account_number?: string;
+      account_name?: string;
+      bank?: { name?: string; slug?: string };
+    };
+    account_number?: string;
+    account_name?: string;
+    bank?: { name?: string };
   };
 };
 
@@ -172,9 +186,31 @@ export class WebhooksService {
   }
 
   private async processPayload(event: PaystackWebhookPayload) {
+    if (
+      event.event === 'dedicatedaccount.assign.success' ||
+      event.event === 'dedicatedaccount.assigned'
+    ) {
+      const customerCode = event.data.customer?.customer_code;
+      const accountNumber =
+        event.data.dedicated_account?.account_number || event.data.account_number;
+      if (!customerCode || !accountNumber) {
+        throw new BadRequestException('Incomplete dedicated account payload.');
+      }
+      await this.wallets.persistAssignedDva({
+        customerCode,
+        accountNumber,
+        accountName:
+          event.data.dedicated_account?.account_name || event.data.account_name,
+        bankName:
+          event.data.dedicated_account?.bank?.name ||
+          event.data.bank?.name ||
+          event.data.authorization?.receiver_bank,
+      });
+    }
+
     if (event.event === 'charge.success') {
       const reference = event.data.reference;
-      const brandId = event.data.metadata?.brandId;
+      const brandId = await this.wallets.findBrandIdForCharge(event.data);
       if (!reference || !brandId || event.data.amount == null) {
         throw new BadRequestException('Incomplete charge.success payload.');
       }

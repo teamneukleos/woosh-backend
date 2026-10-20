@@ -10,6 +10,33 @@ export function paystackPublicKey() {
   return process.env.PAYSTACK_PUBLIC_KEY?.trim() || '';
 }
 
+export class PaystackError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = 'PaystackError';
+  }
+}
+
+export function paystackNeedsIdentification(message: string) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('identif') ||
+    lower.includes('bvn') ||
+    lower.includes('validate') ||
+    lower.includes('personal')
+  );
+}
+
+export function preferredDvaBank() {
+  const configured = process.env.PAYSTACK_DVA_PREFERRED_BANK?.trim();
+  if (configured) return configured;
+  const secret = process.env.PAYSTACK_SECRET_KEY?.trim() ?? '';
+  return secret.startsWith('sk_test') ? 'test-bank' : 'wema-bank';
+}
+
 async function paystackFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const secret = process.env.PAYSTACK_SECRET_KEY?.trim();
   if (!secret) throw new Error('Paystack is not configured');
@@ -30,7 +57,7 @@ async function paystackFetch<T>(path: string, init?: RequestInit): Promise<T> {
   };
 
   if (!res.ok || !json.status) {
-    throw new Error(json.message || `Paystack error ${res.status}`);
+    throw new PaystackError(json.message || `Paystack error ${res.status}`, res.status);
   }
 
   return json.data;
@@ -140,6 +167,101 @@ export async function verifyTransfer(reference: string) {
     currency: string;
     reason?: string;
   }>(`/transfer/verify/${encodeURIComponent(reference)}`);
+}
+
+export async function getPaystackCustomer(emailOrCode: string) {
+  return paystackFetch<{ customer_code: string; email: string }>(
+    `/customer/${encodeURIComponent(emailOrCode)}`,
+  );
+}
+
+export async function createPaystackCustomer(input: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  metadata?: Record<string, unknown>;
+}) {
+  return paystackFetch<{ customer_code: string; email: string; id: number }>(
+    '/customer',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        email: input.email,
+        first_name: input.firstName,
+        last_name: input.lastName,
+        phone: input.phone,
+        metadata: input.metadata,
+      }),
+    },
+  );
+}
+
+export async function updatePaystackCustomer(
+  customerCode: string,
+  input: { firstName: string; lastName: string; phone: string },
+) {
+  return paystackFetch<{ customer_code: string }>(`/customer/${customerCode}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      first_name: input.firstName,
+      last_name: input.lastName,
+      phone: input.phone,
+    }),
+  });
+}
+
+export async function createDedicatedVirtualAccount(input: {
+  customer: string;
+  preferredBank?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+}) {
+  return paystackFetch<{
+    account_number: string;
+    account_name: string;
+    bank: { name: string; slug?: string; id?: number };
+    customer: { customer_code: string };
+  }>('/dedicated_account', {
+    method: 'POST',
+    body: JSON.stringify({
+      customer: input.customer,
+      preferred_bank: input.preferredBank ?? preferredDvaBank(),
+      first_name: input.firstName,
+      last_name: input.lastName,
+      phone: input.phone,
+    }),
+  });
+}
+
+export async function assignDedicatedVirtualAccount(input: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  bvn: string;
+  accountNumber: string;
+  bankCode: string;
+  preferredBank?: string;
+}) {
+  return paystackFetch<{ customer?: { customer_code: string } }>(
+    '/dedicated_account/assign',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        email: input.email,
+        first_name: input.firstName,
+        last_name: input.lastName,
+        phone: input.phone,
+        preferred_bank: input.preferredBank ?? preferredDvaBank(),
+        country: 'NG',
+        account_number: input.accountNumber,
+        bvn: input.bvn,
+        bank_code: input.bankCode,
+      }),
+    },
+  );
 }
 
 export function verifyPaystackWebhookSignature(rawBody: string, signature: string | null) {

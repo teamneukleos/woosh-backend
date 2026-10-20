@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAccessService } from './access.service';
+import { MessagingGateway } from './messaging.gateway';
 
 @Injectable()
 export class MessagingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: CampaignAccessService,
+    private readonly realtime: MessagingGateway,
   ) {}
 
   async list(userId: string) {
@@ -203,9 +205,21 @@ export class MessagingService {
         targetId: message.id,
       },
     });
+    this.realtime.emitMessage({
+      conversationId,
+      message: {
+        id: message.id,
+        body: message.body ?? '',
+        isSystem: false,
+        senderUserId: message.senderUserId ?? userId,
+        createdAt: message.createdAt,
+        readAt: message.readAt,
+      },
+    });
     return {
       id: message.id,
       body: message.body,
+      senderUserId: message.senderUserId,
       createdAt: message.createdAt,
     };
   }

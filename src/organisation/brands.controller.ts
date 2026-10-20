@@ -19,8 +19,9 @@ export class BrandsController {
   @Get()
   @RequireOrg()
   @ApiOperation({
-    summary: 'List client brands in this organisation',
-    description: 'Each brand has its own wallet. Agency money never crosses Brand rows.',
+    summary: 'List brands in this organisation',
+    description:
+      'Each brand has its own wallet. Money never crosses Brand rows — including extra lines under a brand seat.',
   })
   list(@CurrentWorkspace() ctx: WorkspaceSnapshot) {
     return { brands: ctx.brands, activeBrandId: ctx.activeBrandId };
@@ -29,9 +30,9 @@ export class BrandsController {
   @Post()
   @RequirePermission('team.manage')
   @ApiOperation({
-    summary: 'Add a client brand (agency seats)',
+    summary: 'Add a brand (agency or brand seat)',
     description:
-      'Creates the brand, an NGN wallet, and a brand membership for you. Brand seats already have exactly one brand.',
+      'Creates the brand, an NGN wallet, and a brand membership for you. Brand seats may add further brand lines the same way agencies add clients.',
   })
   create(
     @CurrentWorkspace() ctx: WorkspaceSnapshot,
@@ -42,7 +43,7 @@ export class BrandsController {
 
   @Patch(':id')
   @RequirePermission('team.manage')
-  @ApiOperation({ summary: 'Rename or update a client brand' })
+  @ApiOperation({ summary: 'Rename or update a brand' })
   update(
     @CurrentWorkspace() ctx: WorkspaceSnapshot,
     @Param('id') id: string,
