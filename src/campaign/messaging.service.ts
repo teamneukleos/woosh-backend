@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { hasOrgWideBrandAccess } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAccessService } from './access.service';
 import { MessagingGateway } from './messaging.gateway';
@@ -26,6 +27,7 @@ export class MessagingService {
 
     const brandIds = new Set<string>();
     for (const membership of user.memberships) {
+      if (!hasOrgWideBrandAccess(membership.role)) continue;
       for (const brand of membership.organisation.brands) brandIds.add(brand.id);
     }
     for (const membership of user.brandMemberships) brandIds.add(membership.brandId);

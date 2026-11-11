@@ -51,37 +51,41 @@ export function resetPasswordMessage(href: string): MailPayload {
 
 export function teamInviteMessage(input: {
   orgName: string;
+  brandName: string;
   role: string;
   href: string;
 }): MailPayload {
   const org = escapeHtml(input.orgName);
+  const brand = escapeHtml(input.brandName);
   const role = escapeHtml(input.role);
   return {
     to: '',
-    subject: `Join ${input.orgName} on Woosh`,
+    subject: `Join ${input.brandName} on Woosh`,
     html: shell(
-      `You were invited to <strong>${org}</strong> as ${role}. Create an account or sign in with this email to accept.`,
-      'Accept invite',
+      `You were invited to <strong>${brand}</strong> at <strong>${org}</strong> as ${role}. You will only see this brand. You do not have a password yet. Open the link, enter your name, and choose a password to join.`,
+      'Join and set a password',
       input.href,
     ),
-    text: `You were invited to ${input.orgName} as ${input.role}.\n\n${input.href}`,
+    text: `You were invited to ${input.brandName} at ${input.orgName} as ${input.role}. You will only see this brand. You do not have a password yet. Open this link, enter your name, and choose a password to join.\n\n${input.href}`,
   };
 }
 
 export function teammateAddedMessage(input: {
   orgName: string;
+  brandName: string;
   href: string;
 }): MailPayload {
   const org = escapeHtml(input.orgName);
+  const brand = escapeHtml(input.brandName);
   return {
     to: '',
-    subject: `You've been added to ${input.orgName} on Woosh`,
+    subject: `You've been added to ${input.brandName} on Woosh`,
     html: shell(
-      `Your existing Woosh account now has access to <strong>${org}</strong>.`,
+      `Your existing Woosh account now has access to <strong>${brand}</strong> at <strong>${org}</strong>. You will not see other brands in that organisation.`,
       'Open workspace',
       input.href,
     ),
-    text: `Your existing Woosh account now has access to ${input.orgName}.\n\n${input.href}`,
+    text: `Your existing Woosh account now has access to ${input.brandName} at ${input.orgName}.\n\n${input.href}`,
   };
 }
 
