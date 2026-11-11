@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import {
   effectivePermissions,
+  hasOrgWideBrandAccess,
   hasPermission,
   type Permission,
 } from '../common/permissions';
@@ -48,7 +49,10 @@ export class WorkspaceService {
         isPlatformAdmin: true,
         creatorProfile: { select: { id: true } },
         memberships: {
-          select: { organisation: { select: { brands: { select: { id: true } } } } },
+          select: {
+            role: true,
+            organisation: { select: { brands: { select: { id: true } } } },
+          },
         },
         brandMemberships: { select: { brandId: true } },
       },
@@ -58,6 +62,7 @@ export class WorkspaceService {
     }
     const brandIds = new Set(user.brandMemberships.map((row) => row.brandId));
     for (const membership of user.memberships) {
+      if (!hasOrgWideBrandAccess(membership.role)) continue;
       for (const brand of membership.organisation.brands) brandIds.add(brand.id);
     }
     return {
@@ -96,8 +101,10 @@ export class WorkspaceService {
     if (!user) throw new UnauthorizedException();
     const allowed =
       user.isPlatformAdmin ||
-      user.memberships.some((membership) =>
-        hasPermission(membership.role, permission, membership),
+      user.memberships.some(
+        (membership) =>
+          hasOrgWideBrandAccess(membership.role) &&
+          hasPermission(membership.role, permission, membership),
       ) ||
       user.brandMemberships.some((membership) =>
         hasPermission(membership.role, permission),
@@ -133,7 +140,13 @@ export class WorkspaceService {
       ? (organisation?.brands ?? user.brandMemberships.map((row) => row.brand))
       : user.creatorProfile
         ? []
-        : (organisation?.brands ?? []);
+        : hasOrgWideBrandAccess(membership?.role ?? MembershipRole.VIEWER) && organisation
+          ? organisation.brands
+          : user.brandMemberships
+              .map((row) => row.brand)
+              .filter(
+                (brand) => !organisation || brand.organisationId === organisation.id,
+              );
 
     const snapshots = brands.map((brand) => this.presentBrand(brand));
     const active =

@@ -73,6 +73,11 @@ export function hasPermission(
   return permissionsForRole(role).includes(permission);
 }
 
+/** Owners and admins see every brand in the organisation. Other roles are brand-scoped. */
+export function hasOrgWideBrandAccess(role: MembershipRole) {
+  return role === MembershipRole.OWNER || role === MembershipRole.ADMIN;
+}
+
 export function effectivePermissions(flags: MembershipFlags): Permission[] {
   const granted = new Set(permissionsForRole(flags.role));
   if (flags.canApprovePayments) granted.add('payments.approve');

@@ -53,4 +53,18 @@ export class RegisterDto {
   @ValidateIf((body: RegisterDto) => !body.inviteToken?.trim())
   @IsIn(ACCOUNT_TYPES)
   accountType?: AccountType;
+
+  @ApiPropertyOptional({
+    example: 'Palm Cola',
+    description: 'Required for brand and agency seats. Ignored for creators and team invites.',
+  })
+  @ValidateIf(
+    (body: RegisterDto) =>
+      !body.inviteToken?.trim() &&
+      (body.accountType === 'brand' || body.accountType === 'agency'),
+  )
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  organisationName?: string;
 }

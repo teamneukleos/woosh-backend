@@ -29,7 +29,7 @@ export class TeamController {
   @ApiOperation({
     summary: 'Invite a teammate',
     description:
-      'Existing accounts are added immediately and emailed. New emails get a Resend invite (or a console link when RESEND_API_KEY is empty). Cannot invite as OWNER.',
+      'Pass brandId. Existing accounts are added to that brand immediately. New emails get a Resend invite (or a console link when RESEND_API_KEY is empty). Non-admin members only see the brands they were invited to. Cannot invite as OWNER.',
   })
   invite(
     @CurrentWorkspace() ctx: WorkspaceSnapshot,

@@ -78,6 +78,7 @@ model Brand {
   conversations      Conversation[]
   wallet             BrandWallet?
   financialDocuments FinancialDocument[]
+  teamInvites        TeamInvite[]
 }
 
 /// Org member scoped to one client brand (agency roster / brand-seat owner).
@@ -97,6 +98,7 @@ model BrandMembership {
 model TeamInvite {
   id             String         @id @default(cuid())
   organisationId String
+  brandId        String
   email          String
   role           MembershipRole @default(MANAGER)
   token          String         @unique
@@ -106,10 +108,12 @@ model TeamInvite {
   createdAt      DateTime       @default(now())
 
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  brand        Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
   invitedBy    User         @relation("TeamInviteSender", fields: [invitedById], references: [id])
 
   @@index([email])
   @@index([organisationId])
+  @@index([brandId])
 }
 
 // ─── Seat billing (0% of creator rate; brands/agencies pay for brief volume) ─

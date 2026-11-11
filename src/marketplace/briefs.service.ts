@@ -176,6 +176,10 @@ export class BriefsService {
             !brandAccess && actor.creatorProfileId
               ? { creatorProfileId: actor.creatorProfileId }
               : undefined,
+          include: {
+            creator: { select: { id: true, displayName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
         },
         applications: {
           where:

@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { MembershipRole, OrganisationType } from '@prisma/client';
+import { hasOrgWideBrandAccess } from '../common/permissions';
 import { BRAND_INDUSTRIES } from '../common/taxonomy';
 import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
 import { MailService } from '../mail/mail.service';
@@ -147,6 +148,7 @@ export class OrganisationService {
           id: true,
           email: true,
           role: true,
+          brandId: true,
           expiresAt: true,
           createdAt: true,
         },
@@ -175,7 +177,10 @@ export class OrganisationService {
     if (!token) throw new BadRequestException('Invite not found or expired.');
     const invite = await this.prisma.teamInvite.findUnique({
       where: { token: hashToken(token) },
-      include: { organisation: { select: { publicName: true } } },
+      include: {
+        organisation: { select: { publicName: true } },
+        brand: { select: { name: true } },
+      },
     });
     if (!invite || invite.expiresAt < new Date() || invite.acceptedAt) {
       throw new BadRequestException('Invite not found or expired.');
@@ -183,6 +188,7 @@ export class OrganisationService {
     return {
       email: invite.email,
       orgName: invite.organisation.publicName,
+      brandName: invite.brand.name,
       role: invite.role,
     };
   }
@@ -200,6 +206,20 @@ export class OrganisationService {
     }
 
     const email = input.email.trim().toLowerCase();
+    const brand = await this.prisma.brand.findUnique({
+      where: { id: input.brandId },
+    });
+    if (!brand || brand.organisationId !== organisationId) {
+      throw new BadRequestException('Select a brand in this organisation.');
+    }
+    if (
+      !ctx.user.isPlatformAdmin &&
+      !hasOrgWideBrandAccess(ctx.membership?.role ?? MembershipRole.VIEWER) &&
+      !ctx.brands.some((row) => row.id === brand.id)
+    ) {
+      throw new ForbiddenException('You cannot invite people to that brand.');
+    }
+
     const existing = await this.prisma.user.findUnique({ where: { email } });
     const currentMembership = existing
       ? await this.prisma.membership.findUnique({
@@ -223,6 +243,7 @@ export class OrganisationService {
     const invite = await this.prisma.teamInvite.create({
       data: {
         organisationId,
+        brandId: brand.id,
         email,
         role: input.role,
         token: hashToken(raw),
@@ -236,12 +257,12 @@ export class OrganisationService {
         userId: ctx.user.id,
         type: 'team.invite.sent',
         title: 'Invite sent',
-        body: `Invite emailed to ${email} (${input.role}).`,
+        body: `Invite emailed to ${email} for ${brand.name} (${input.role}).`,
         href: '/app/team',
       },
     });
     await this.audit(ctx.user.id, 'organisation.invite.sent', 'TeamInvite', invite.id, {
-      after: { email, role: input.role },
+      after: { email, role: input.role, brandId: brand.id },
     });
 
     if (existing) {
@@ -254,6 +275,17 @@ export class OrganisationService {
         },
         create: {
           organisationId,
+          userId: existing.id,
+          role: input.role,
+        },
+        update: { role: input.role },
+      });
+      await this.prisma.brandMembership.upsert({
+        where: {
+          brandId_userId: { brandId: brand.id, userId: existing.id },
+        },
+        create: {
+          brandId: brand.id,
           userId: existing.id,
           role: input.role,
         },
@@ -275,6 +307,7 @@ export class OrganisationService {
       await this.mail.sendBestEffort({
         ...teammateAddedMessage({
           orgName: ctx.organisation!.publicName,
+          brandName: brand.name,
           href: this.mail.frontendUrl('/app'),
         }),
         to: email,
@@ -284,7 +317,7 @@ export class OrganisationService {
         status: 'added' as const,
         email,
         role: input.role,
-        message: 'Existing account added to the workspace.',
+        message: `Existing account added to ${brand.name}.`,
       };
     }
 
@@ -292,6 +325,7 @@ export class OrganisationService {
     await this.mail.sendBestEffort({
       ...teamInviteMessage({
         orgName: ctx.organisation!.publicName,
+        brandName: brand.name,
         role: roleLabel,
         href: this.mail.frontendUrl(
           `/invite?token=${raw}&email=${encodeURIComponent(email)}`,
@@ -341,6 +375,17 @@ export class OrganisationService {
         },
         create: {
           organisationId: invite.organisationId,
+          userId,
+          role: invite.role,
+        },
+        update: { role: invite.role },
+      }),
+      this.prisma.brandMembership.upsert({
+        where: {
+          brandId_userId: { brandId: invite.brandId, userId },
+        },
+        create: {
+          brandId: invite.brandId,
           userId,
           role: invite.role,
         },

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { MembershipRole } from '@prisma/client';
-import { IsEmail, IsIn } from 'class-validator';
+import { IsEmail, IsIn, IsString, MinLength } from 'class-validator';
 
 export const ASSIGNABLE_ROLES = [
   MembershipRole.ADMIN,
@@ -18,4 +18,12 @@ export class InviteTeammateDto {
   @ApiProperty({ enum: ASSIGNABLE_ROLES, example: MembershipRole.MANAGER })
   @IsIn(ASSIGNABLE_ROLES)
   role!: (typeof ASSIGNABLE_ROLES)[number];
+
+  @ApiProperty({
+    example: 'clxyzbrand',
+    description: 'Brand this teammate can access. They will not see other client brands.',
+  })
+  @IsString()
+  @MinLength(1)
+  brandId!: string;
 }

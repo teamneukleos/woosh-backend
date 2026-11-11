@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { OrganisationType, UserStatus } from '@prisma/client';
+import { hasOrgWideBrandAccess } from '../common/permissions';
 import { compare, hash } from 'bcryptjs';
 import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
 import { seatFor } from '../common/seat';
@@ -37,6 +38,7 @@ export class IdentityService {
     email: string;
     password: string;
     accountType?: AccountType;
+    organisationName?: string;
     inviteToken?: string;
   }) {
     const email = input.email.toLowerCase().trim();
@@ -88,6 +90,13 @@ export class IdentityService {
             role: pendingInvite.role,
           },
         });
+        await tx.brandMembership.create({
+          data: {
+            brandId: pendingInvite.brandId,
+            userId: created.id,
+            role: pendingInvite.role,
+          },
+        });
         await tx.teamInvite.update({
           where: { id: pendingInvite.id },
           data: { acceptedAt: new Date() },
@@ -100,14 +109,21 @@ export class IdentityService {
           },
         });
       } else {
+        const organisationName = input.organisationName?.trim();
+        if (!organisationName) {
+          throw new BadRequestException(
+            'Organisation name is required for brand and agency seats.',
+          );
+        }
+
         const org = await tx.organisation.create({
           data: {
             type:
               input.accountType === 'agency'
                 ? OrganisationType.AGENCY
                 : OrganisationType.BRAND,
-            legalName: input.name.trim(),
-            publicName: input.name.trim(),
+            legalName: organisationName,
+            publicName: organisationName,
             country: 'NG',
           },
         });
@@ -128,7 +144,7 @@ export class IdentityService {
           const brand = await tx.brand.create({
             data: {
               organisationId: org.id,
-              name: input.name.trim(),
+              name: organisationName,
               country: 'NG',
             },
           });
@@ -413,7 +429,11 @@ export class IdentityService {
 
     const membership = user.memberships[0] ?? null;
     const organisation = membership?.organisation ?? null;
-    const brands = organisation?.brands ?? user.brandMemberships.map((m) => m.brand);
+    const brands =
+      user.isPlatformAdmin ||
+      (membership && hasOrgWideBrandAccess(membership.role))
+        ? (organisation?.brands ?? user.brandMemberships.map((m) => m.brand))
+        : user.brandMemberships.map((m) => m.brand);
     const seat = seatFor({
       isPlatformAdmin: user.isPlatformAdmin,
       hasCreatorProfile: Boolean(user.creatorProfile),

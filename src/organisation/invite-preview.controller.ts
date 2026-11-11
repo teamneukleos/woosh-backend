@@ -10,7 +10,7 @@ export class InvitePreviewController {
   @Get('preview')
   @ApiOperation({
     summary: 'Public invite details',
-    description: 'Email and org name for the accept page. Token stays unguessable.',
+    description: 'Email, org name, and brand name for the accept page. Token stays unguessable.',
   })
   preview(@Query('token') token: string) {
     return this.organisation.previewInvite(token);
