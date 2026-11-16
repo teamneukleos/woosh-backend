@@ -39,6 +39,14 @@ export class DiscoveryQueryDto {
   @IsBoolean()
   prospectOnly?: boolean;
 
+  @ApiPropertyOptional({
+    description: 'Only claimed creators and unclaimed handles this organisation has shortlisted.',
+  })
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsOptional()
+  @IsBoolean()
+  savedOnly?: boolean;
+
   @ApiPropertyOptional({ example: 'NG' })
   @IsOptional()
   @IsString()

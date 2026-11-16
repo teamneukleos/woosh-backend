@@ -94,22 +94,39 @@ export function claimInviteMessage(input: {
   handle: string;
   href: string;
   note?: string | null;
+  briefTitle?: string;
+  briefSummary?: string;
 }): MailPayload {
   const brand = escapeHtml(input.brandName);
   const handle = escapeHtml(input.handle);
-  const note = input.note?.trim()
+  const brief = input.briefTitle
+    ? ` They want you on <strong>${escapeHtml(input.briefTitle)}</strong>. Claim your profile and finish setup before you can take the work.`
+    : '';
+  const summary = input.briefSummary?.trim()
+    ? `<blockquote>${escapeHtml(input.briefSummary.trim())}</blockquote>`
+    : '';
+  const note = !summary && input.note?.trim()
     ? `<blockquote>${escapeHtml(input.note.trim())}</blockquote>`
     : '';
-  const noteText = input.note?.trim() ? `\n\n${input.note.trim()}` : '';
+  const extraText = input.briefTitle
+    ? `\n\nThey invited you to ${input.briefTitle}. Claim your profile and finish setup before you can take the work.`
+    : '';
+  const noteText = input.briefSummary?.trim()
+    ? `\n\n${input.briefSummary.trim()}`
+    : input.note?.trim()
+      ? `\n\n${input.note.trim()}`
+      : '';
   return {
     to: '',
-    subject: `${input.brandName} invited you to claim @${input.handle} on Woosh`,
+    subject: input.briefTitle
+      ? `${input.brandName} invited @${input.handle} to ${input.briefTitle} on Woosh`
+      : `${input.brandName} invited you to claim @${input.handle} on Woosh`,
     html: shell(
-      `<strong>${brand}</strong> invited you to claim <strong>@${handle}</strong> on Woosh.${note}`,
+      `<strong>${brand}</strong> invited you to claim <strong>@${handle}</strong> on Woosh.${brief}${summary}${note}`,
       'Claim profile',
       input.href,
     ),
-    text: `${input.brandName} invited you to claim @${input.handle} on Woosh.${noteText}\n\n${input.href}`,
+    text: `${input.brandName} invited you to claim @${input.handle} on Woosh.${extraText}${noteText}\n\n${input.href}`,
   };
 }
 

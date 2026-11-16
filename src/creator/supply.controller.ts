@@ -90,7 +90,10 @@ export class SupplyController {
 
   @Post(':id/save')
   @RequirePermission('creators.search')
-  @ApiOperation({ summary: 'Save a claimed creator to the org roster' })
+  @ApiOperation({
+    summary: 'Shortlist a claimed creator or unclaimed handle',
+    description: 'Silent roster save. They are not notified until invited to a brief.',
+  })
   save(
     @CurrentUser() user: { id: string },
     @Param('id') id: string,
@@ -101,7 +104,7 @@ export class SupplyController {
 
   @Delete(':id/save')
   @RequirePermission('creators.search')
-  @ApiOperation({ summary: 'Remove a claimed creator from the saved roster' })
+  @ApiOperation({ summary: 'Remove a claimed creator or unclaimed handle from the shortlist' })
   unsave(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.supply.unsaveCreator(user.id, id);
   }

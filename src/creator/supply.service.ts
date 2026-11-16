@@ -89,14 +89,18 @@ export class SupplyService {
       items.filter((item) => item.type === 'claimed').map((item) => item.id),
       items.filter((item) => item.type === 'prospect').map((item) => item.id),
     );
-    return items.map((item) => ({
+    const withFlags = items.map((item) => ({
       ...item,
-      saved: item.type === 'claimed' && flags.saved.has(item.id),
+      saved: flags.saved.has(item.id),
       interested:
         item.type === 'prospect'
           ? flags.interestedProspects.has(item.id)
           : flags.interestedCreators.has(item.id),
     }));
+    if (filters.savedOnly) {
+      return withFlags.filter((item) => item.saved);
+    }
+    return withFlags;
   }
 
   async createProspect(userId: string, input: CreateProspectDto) {
@@ -145,7 +149,11 @@ export class SupplyService {
     const presented = this.presentProspect(prospect);
     if (!userId) return presented;
     const flags = await this.loadRelationshipFlags(userId, brandId, [], [id]);
-    return { ...presented, interested: flags.interestedProspects.has(id) };
+    return {
+      ...presented,
+      saved: flags.saved.has(id),
+      interested: flags.interestedProspects.has(id),
+    };
   }
 
   async getCreator(id: string, userId: string, brandId?: string) {
@@ -158,66 +166,86 @@ export class SupplyService {
     return this.getProspect(id, userId, brandId);
   }
 
-  async saveCreator(userId: string, creatorProfileId: string, brandId?: string) {
+  async saveCreator(userId: string, id: string, brandId?: string) {
     const ctx = await this.workspace.requireOrganisation(userId, brandId);
     const profile = await this.prisma.creatorProfile.findUnique({
-      where: { id: creatorProfileId },
+      where: { id },
       select: { id: true },
     });
-    if (!profile) throw new NotFoundException('Creator not found.');
+    const prospect = profile
+      ? null
+      : await this.prisma.creatorProspect.findUnique({
+          where: { id },
+          select: { id: true, claimedProfileId: true },
+        });
+    const creatorProfileId = profile?.id ?? prospect?.claimedProfileId ?? null;
+    const prospectId = creatorProfileId ? null : prospect?.id ?? null;
+    if (!creatorProfileId && !prospectId) {
+      throw new NotFoundException('Creator not found.');
+    }
 
-    let list = await this.prisma.creatorList.findFirst({
-      where: { organisationId: ctx.organisation.id, name: 'Saved creators' },
-    });
-    if (!list) {
-      list = await this.prisma.creatorList.create({
-        data: {
-          organisationId: ctx.organisation.id,
-          name: 'Saved creators',
-          brandLinks: ctx.activeBrandId
-            ? { create: { brandId: ctx.activeBrandId } }
-            : undefined,
+    const list = await this.ensureSavedList(ctx.organisation.id, ctx.activeBrandId);
+    if (creatorProfileId) {
+      await this.prisma.creatorListItem.upsert({
+        where: {
+          listId_creatorProfileId: { listId: list.id, creatorProfileId },
         },
+        create: { listId: list.id, creatorProfileId },
+        update: {},
+      });
+    } else if (prospectId) {
+      await this.prisma.creatorListItem.upsert({
+        where: {
+          listId_prospectId: { listId: list.id, prospectId },
+        },
+        create: { listId: list.id, prospectId },
+        update: {},
       });
     }
-    await this.prisma.creatorListItem.upsert({
-      where: {
-        listId_creatorProfileId: {
-          listId: list.id,
-          creatorProfileId,
-        },
-      },
-      create: { listId: list.id, creatorProfileId },
-      update: {},
-    });
     await this.analytics.recordBestEffort({
       eventType: 'CREATOR_SAVED',
       actorUserId: userId,
       organisationId: ctx.organisation.id,
       brandId: ctx.activeBrandId ?? undefined,
-      creatorProfileId,
+      creatorProfileId: creatorProfileId ?? undefined,
     });
     return { ok: true, saved: true };
   }
 
-  async unsaveCreator(userId: string, creatorProfileId: string) {
+  async unsaveCreator(userId: string, id: string) {
     const ctx = await this.workspace.requireOrganisation(userId);
-    const item = await this.prisma.creatorListItem.findFirst({
+    const items = await this.prisma.creatorListItem.findMany({
       where: {
-        creatorProfileId,
         list: { organisationId: ctx.organisation.id },
+        OR: [{ creatorProfileId: id }, { prospectId: id }],
       },
     });
-    if (item) {
-      await this.prisma.creatorListItem.delete({ where: { id: item.id } });
+    if (items.length) {
+      await this.prisma.creatorListItem.deleteMany({
+        where: { id: { in: items.map((item) => item.id) } },
+      });
       await this.analytics.recordBestEffort({
         eventType: 'CREATOR_UNSAVED',
         actorUserId: userId,
         organisationId: ctx.organisation.id,
-        creatorProfileId,
+        creatorProfileId: items.find((item) => item.creatorProfileId)?.creatorProfileId ?? undefined,
       });
     }
     return { ok: true, saved: false };
+  }
+
+  private async ensureSavedList(organisationId: string, activeBrandId?: string | null) {
+    const existing = await this.prisma.creatorList.findFirst({
+      where: { organisationId, name: 'Saved creators' },
+    });
+    if (existing) return existing;
+    return this.prisma.creatorList.create({
+      data: {
+        organisationId,
+        name: 'Saved creators',
+        brandLinks: activeBrandId ? { create: { brandId: activeBrandId } } : undefined,
+      },
+    });
   }
 
   async expressInterest(userId: string, input: ExpressInterestDto) {
@@ -664,16 +692,20 @@ export class SupplyService {
     const organisationId = ctx.organisation?.id;
     const activeBrandId = brandId || ctx.activeBrandId || undefined;
 
-    if (organisationId && claimedIds.length) {
+    if (organisationId && (claimedIds.length || prospectIds.length)) {
       const items = await this.prisma.creatorListItem.findMany({
         where: {
-          creatorProfileId: { in: claimedIds },
           list: { organisationId, name: 'Saved creators' },
+          OR: [
+            ...(claimedIds.length ? [{ creatorProfileId: { in: claimedIds } }] : []),
+            ...(prospectIds.length ? [{ prospectId: { in: prospectIds } }] : []),
+          ],
         },
-        select: { creatorProfileId: true },
+        select: { creatorProfileId: true, prospectId: true },
       });
       for (const item of items) {
         if (item.creatorProfileId) saved.add(item.creatorProfileId);
+        if (item.prospectId) saved.add(item.prospectId);
       }
     }
 

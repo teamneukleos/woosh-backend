@@ -36,6 +36,20 @@ export class BriefsController {
     return this.briefs.listForBrand(user.id, headerBrandId || brandId);
   }
 
+  @Get('applications')
+  @RequireOrg()
+  @ApiOperation({
+    summary: 'Active applications for the current brand',
+    description: 'APPLIED and SHORTLISTED creators across this brand’s briefs.',
+  })
+  listApplications(
+    @CurrentUser() user: { id: string },
+    @Query('brandId') brandId?: string,
+    @Headers('x-brand-id') headerBrandId?: string,
+  ) {
+    return this.briefs.listActiveApplications(user.id, headerBrandId || brandId);
+  }
+
   @Post()
   @RequirePermission('briefs.manage')
   @ApiOperation({
@@ -69,12 +83,20 @@ export class BriefsController {
 
   @Post(':id/invites')
   @RequirePermission('briefs.manage')
-  @ApiOperation({ summary: 'Invite a claimed creator to this brief' })
+  @ApiOperation({
+    summary: 'Invite a claimed creator or unclaimed account to this brief',
+    description:
+      'Unclaimed accounts get a claim email. They must finish profile setup before they can apply.',
+  })
   invite(
     @CurrentUser() user: { id: string },
     @Param('id') id: string,
     @Body() body: InviteToBriefDto,
   ) {
-    return this.briefs.invite(user.id, id, body.creatorProfileId, body.message);
+    return this.briefs.invite(user.id, id, {
+      creatorProfileId: body.creatorProfileId,
+      prospectId: body.prospectId,
+      message: body.message,
+    });
   }
 }

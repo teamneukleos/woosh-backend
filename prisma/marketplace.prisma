@@ -72,7 +72,8 @@ enum InvitationStatus {
 model BriefInvitation {
   id               String           @id @default(cuid())
   briefId          String
-  creatorProfileId String
+  creatorProfileId String?
+  prospectId       String?
   status           InvitationStatus @default(SENT)
   message          String?
   viewedAt         DateTime?
@@ -81,10 +82,12 @@ model BriefInvitation {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  brief   Brief          @relation(fields: [briefId], references: [id], onDelete: Cascade)
-  creator CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  brief    Brief           @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  creator  CreatorProfile? @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  prospect CreatorProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
 
   @@unique([briefId, creatorProfileId])
+  @@index([prospectId])
 }
 
 enum ApplicationStatus {
