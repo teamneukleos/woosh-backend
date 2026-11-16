@@ -60,26 +60,32 @@ export class WorkRemindersService {
     }
 
     await Promise.all([
-      ...expiringInvitations.map((invitation) =>
-        this.notifications.create({
-          userId: invitation.creator.userId,
-          type: 'brief.invitation.expiring',
-          title: 'Invitation expires soon',
-          body: `${invitation.brief.brand.name} invited you to ${invitation.brief.title}`,
-          href: `/app/jobs/${invitation.briefId}`,
-          dedupeKey: `invite-expiring:${invitation.id}:${invitation.brief.applicationDeadline?.toISOString()}`,
-        }),
-      ),
-      ...expiredInvitations.map((invitation) =>
-        this.notifications.create({
-          userId: invitation.creator.userId,
-          type: 'brief.invitation.expired',
-          title: 'Invitation expired',
-          body: `${invitation.brief.title} is no longer accepting applications`,
-          href: '/app/work',
-          dedupeKey: `invite-expired:${invitation.id}`,
-        }),
-      ),
+      ...expiringInvitations.flatMap((invitation) => {
+        if (!invitation.creator) return [];
+        return [
+          this.notifications.create({
+            userId: invitation.creator.userId,
+            type: 'brief.invitation.expiring',
+            title: 'Invitation expires soon',
+            body: `${invitation.brief.brand.name} invited you to ${invitation.brief.title}`,
+            href: `/app/jobs/${invitation.briefId}`,
+            dedupeKey: `invite-expiring:${invitation.id}:${invitation.brief.applicationDeadline?.toISOString()}`,
+          }),
+        ];
+      }),
+      ...expiredInvitations.flatMap((invitation) => {
+        if (!invitation.creator) return [];
+        return [
+          this.notifications.create({
+            userId: invitation.creator.userId,
+            type: 'brief.invitation.expired',
+            title: 'Invitation expired',
+            body: `${invitation.brief.title} is no longer accepting applications`,
+            href: '/app/work',
+            dedupeKey: `invite-expired:${invitation.id}`,
+          }),
+        ];
+      }),
       ...dueDeliverables.map((deliverable) => {
         const overdue = !!deliverable.dueAt && deliverable.dueAt < now;
         return this.notifications.create({

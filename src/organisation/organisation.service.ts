@@ -133,7 +133,7 @@ export class OrganisationService {
 
   async listTeam(ctx: WorkspaceSnapshot) {
     const organisationId = ctx.organisation!.id;
-    const [members, pendingInvites] = await Promise.all([
+    const [members, pendingInvites, orgBrands] = await Promise.all([
       this.prisma.membership.findMany({
         where: { organisationId },
         include: {
@@ -151,23 +151,70 @@ export class OrganisationService {
           brandId: true,
           expiresAt: true,
           createdAt: true,
+          brand: { select: { id: true, name: true } },
         },
+      }),
+      this.prisma.brand.findMany({
+        where: { organisationId },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
       }),
     ]);
 
+    const seats = members.length
+      ? await this.prisma.brandMembership.findMany({
+          where: {
+            userId: { in: members.map((row) => row.userId) },
+            brandId: { in: orgBrands.map((brand) => brand.id) },
+          },
+          select: {
+            userId: true,
+            role: true,
+            brand: { select: { id: true, name: true } },
+          },
+        })
+      : [];
+
+    const seatsByUser = new Map<string, typeof seats>();
+    for (const seat of seats) {
+      const list = seatsByUser.get(seat.userId) ?? [];
+      list.push(seat);
+      seatsByUser.set(seat.userId, list);
+    }
+
     return {
-      members: members.map((row) => ({
-        userId: row.user.id,
-        email: row.user.email,
-        name: row.user.name,
-        image: row.user.image,
-        role: row.role,
-        canApprovePayments: row.canApprovePayments,
-        canEditRates: row.canEditRates,
-        canManageTeam: row.canManageTeam,
-        canExportData: row.canExportData,
-        createdAt: row.createdAt,
-      })),
+      members: members.map((row) => {
+        const explicit = seatsByUser.get(row.userId) ?? [];
+        const brands = hasOrgWideBrandAccess(row.role)
+          ? orgBrands.map((brand) => {
+              const seat = explicit.find((item) => item.brand.id === brand.id);
+              return {
+                id: brand.id,
+                name: brand.name,
+                role: seat?.role ?? row.role,
+              };
+            })
+          : explicit
+              .map((seat) => ({
+                id: seat.brand.id,
+                name: seat.brand.name,
+                role: seat.role,
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name));
+        return {
+          userId: row.user.id,
+          email: row.user.email,
+          name: row.user.name,
+          image: row.user.image,
+          role: row.role,
+          brands,
+          canApprovePayments: row.canApprovePayments,
+          canEditRates: row.canEditRates,
+          canManageTeam: row.canManageTeam,
+          canExportData: row.canExportData,
+          createdAt: row.createdAt,
+        };
+      }),
       pendingInvites,
     };
   }

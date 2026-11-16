@@ -173,13 +173,74 @@ export class ClaimService {
         href: '/app/messages',
       },
     });
+    const rosterItems = await this.prisma.creatorListItem.findMany({
+      where: { prospectId: prospect.id, creatorProfileId: null },
+    });
+    for (const item of rosterItems) {
+      const already = await this.prisma.creatorListItem.findFirst({
+        where: {
+          listId: item.listId,
+          creatorProfileId: profile.id,
+          NOT: { id: item.id },
+        },
+      });
+      if (already) {
+        await this.prisma.creatorListItem.delete({ where: { id: item.id } });
+        continue;
+      }
+      await this.prisma.creatorListItem.update({
+        where: { id: item.id },
+        data: { creatorProfileId: profile.id },
+      });
+    }
+
+    const pendingBriefs = await this.prisma.briefInvitation.findMany({
+      where: { prospectId: prospect.id },
+      include: { brief: { include: { brand: { select: { name: true } } } } },
+    });
+    const attachedBriefs = [];
+    for (const pending of pendingBriefs) {
+      const already = await this.prisma.briefInvitation.findFirst({
+        where: {
+          briefId: pending.briefId,
+          creatorProfileId: profile.id,
+          NOT: { id: pending.id },
+        },
+      });
+      if (already) {
+        await this.prisma.briefInvitation.delete({ where: { id: pending.id } });
+        continue;
+      }
+      if (!pending.creatorProfileId) {
+        await this.prisma.briefInvitation.update({
+          where: { id: pending.id },
+          data: { creatorProfileId: profile.id },
+        });
+      }
+      attachedBriefs.push(pending);
+    }
+    for (const pending of attachedBriefs) {
+      await this.prisma.notification.create({
+        data: {
+          userId: user.id,
+          type: 'brief.invited',
+          title: `${pending.brief.brand.name} invited you to ${pending.brief.title}`,
+          body: `${pending.brief.brand.name} invited you to “${pending.brief.title}”. Finish your profile and submit it for review before you can apply.`,
+          href: `/app/jobs/${pending.brief.id}`,
+          dedupeKey: `brief-invite:${pending.id}:${profile.id}`,
+        },
+      });
+    }
+
     await this.prisma.notification.create({
       data: {
         userId: user.id,
         type: 'claim.complete',
         title: 'Welcome to Woosh',
-        body: `You claimed @${prospect.handle}. ${interest.brand.name} is waiting to chat.`,
-        href: '/app/messages',
+        body: attachedBriefs.length
+          ? `You claimed @${prospect.handle}. Finish your profile setup before you can take the invited brief.`
+          : `You claimed @${prospect.handle}. ${interest.brand.name} is waiting to chat.`,
+        href: attachedBriefs.length ? '/app/profile' : '/app/messages',
       },
     });
     await this.prisma.auditEvent.create({

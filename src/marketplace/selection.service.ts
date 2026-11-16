@@ -52,7 +52,7 @@ export class SelectionService {
     }
     if (creator.marketplaceStatus !== 'PUBLISHED') {
       throw new ForbiddenException(
-        'Publish your creator profile before applying to marketplace briefs.',
+        'Finish your profile setup before applying to this brief.',
       );
     }
     if (brief.status !== BriefStatus.OPEN && brief.status !== BriefStatus.SELECTING) {

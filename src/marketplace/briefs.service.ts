@@ -5,12 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  ApplicationStatus,
   BriefDistribution,
+  BriefInvitation,
   BriefStatus,
   Prisma,
+  ProspectStatus,
   RateMode,
   SocialChannel,
 } from '@prisma/client';
+import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
+import { MailService } from '../mail/mail.service';
+import { claimInviteMessage } from '../mail/templates';
 import { asNumber } from '../common/fees';
 import { scoreBriefFit } from '../common/matching';
 import { automatedBriefChecks, moderationPath } from '../common/trust';
@@ -23,6 +29,7 @@ export class BriefsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
+    private readonly mail: MailService,
   ) {}
 
   async create(userId: string, input: CreateBriefDto, headerBrandId?: string) {
@@ -143,6 +150,42 @@ export class BriefsService {
     }));
   }
 
+  async listActiveApplications(userId: string, brandId?: string) {
+    if (!brandId) {
+      throw new BadRequestException('Select a brand first (brandId or X-Brand-Id).');
+    }
+    await this.workspace.requireBrandAccess(userId, brandId);
+    const applications = await this.prisma.application.findMany({
+      where: {
+        brief: { brandId },
+        status: {
+          in: [ApplicationStatus.APPLIED, ApplicationStatus.SHORTLISTED],
+        },
+      },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            displayName: true,
+            avatarUrl: true,
+            avatarStatus: true,
+          },
+        },
+        brief: { select: { id: true, title: true, status: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return applications.map((application) => ({
+      id: application.id,
+      status: application.status,
+      proposedRate: asNumber(application.proposedRate),
+      currency: application.currency,
+      createdAt: application.createdAt,
+      creator: application.creator,
+      brief: application.brief,
+    }));
+  }
+
   async get(userId: string, briefId: string) {
     const actor = await this.workspace.getWorkActor(userId);
     const access = await this.prisma.brief.findUnique({
@@ -178,6 +221,7 @@ export class BriefsService {
               : undefined,
           include: {
             creator: { select: { id: true, displayName: true } },
+            prospect: { select: { id: true, handle: true, displayName: true } },
           },
           orderBy: { createdAt: 'desc' },
         },
@@ -305,36 +349,153 @@ export class BriefsService {
       }));
   }
 
-  async invite(userId: string, briefId: string, creatorProfileId: string, message?: string) {
+  async invite(
+    userId: string,
+    briefId: string,
+    input: { creatorProfileId?: string; prospectId?: string; message?: string },
+  ): Promise<BriefInvitation> {
+    const creatorProfileId = input.creatorProfileId?.trim();
+    const prospectId = input.prospectId?.trim();
+    if (!creatorProfileId && !prospectId) {
+      throw new BadRequestException('Select a claimed creator or an unclaimed account.');
+    }
+    if (creatorProfileId && prospectId) {
+      throw new BadRequestException('Invite either a claimed creator or an unclaimed account.');
+    }
+
     const brief = await this.prisma.brief.findUnique({
       where: { id: briefId },
       include: { brand: true },
     });
     if (!brief) throw new NotFoundException('Brief not found.');
     await this.workspace.requireBrandPermission(userId, brief.brandId, 'briefs.manage');
-    const creator = await this.prisma.creatorProfile.findUnique({
-      where: { id: creatorProfileId },
-    });
-    if (!creator) throw new NotFoundException('Creator not found.');
 
-    const invite = await this.prisma.briefInvitation.upsert({
+    if (creatorProfileId) {
+      const creator = await this.prisma.creatorProfile.findUnique({
+        where: { id: creatorProfileId },
+      });
+      if (!creator) throw new NotFoundException('Creator not found.');
+      const invite = await this.prisma.briefInvitation.upsert({
+        where: {
+          briefId_creatorProfileId: { briefId, creatorProfileId },
+        },
+        create: { briefId, creatorProfileId, message: input.message, status: 'SENT' },
+        update: { message: input.message, status: 'SENT' },
+      });
+      await this.prisma.notification.create({
+        data: {
+          userId: creator.userId,
+          type: 'brief.invited',
+          title: `${brief.brand.name} invited you to ${brief.title}`,
+          body: this.briefInviteCopy(brief, input.message),
+          href: `/app/jobs/${brief.id}`,
+        },
+      });
+      await this.audit(userId, 'brief.invite', 'BriefInvitation', invite.id);
+      return invite;
+    }
+
+    const prospect = await this.prisma.creatorProspect.findUnique({
+      where: { id: prospectId },
+    });
+    if (!prospect) throw new NotFoundException('Unclaimed account not found.');
+    if (prospect.status === ProspectStatus.CLAIMED && prospect.claimedProfileId) {
+      return this.invite(userId, briefId, {
+        creatorProfileId: prospect.claimedProfileId,
+        message: input.message,
+      });
+    }
+
+    const existing = await this.prisma.briefInvitation.findFirst({
+      where: { briefId, prospectId },
+    });
+    const invite = existing
+      ? await this.prisma.briefInvitation.update({
+          where: { id: existing.id },
+          data: { message: input.message, status: 'SENT' },
+        })
+      : await this.prisma.briefInvitation.create({
+          data: {
+            briefId,
+            prospectId,
+            message: input.message,
+            status: 'SENT',
+          },
+        });
+
+    const raw = newOpaqueToken();
+    const expires = new Date();
+    expires.setDate(expires.getDate() + 14);
+    const openInterest = await this.prisma.brandInterest.findFirst({
       where: {
-        briefId_creatorProfileId: { briefId, creatorProfileId },
+        brandId: brief.brandId,
+        prospectId,
+        status: { not: 'CLOSED' },
       },
-      create: { briefId, creatorProfileId, message, status: 'SENT' },
-      update: { message, status: 'SENT' },
+      orderBy: { createdAt: 'desc' },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: creator.userId,
-        type: 'brief.invited',
-        title: "You're invited to a brief",
-        body: `${brief.brand.name}: ${brief.title}`,
-        href: `/app/jobs/${brief.id}`,
-      },
-    });
+    if (openInterest) {
+      await this.prisma.brandInterest.update({
+        where: { id: openInterest.id },
+        data: {
+          message: input.message,
+          claimToken: hashToken(raw),
+          claimTokenExpiresAt: expires,
+          status: 'INVITED',
+        },
+      });
+    } else {
+      await this.prisma.brandInterest.create({
+        data: {
+          brandId: brief.brandId,
+          prospectId,
+          message: input.message,
+          status: 'INVITED',
+          claimToken: hashToken(raw),
+          claimTokenExpiresAt: expires,
+          createdById: userId,
+        },
+      });
+    }
+    if (prospect.status === ProspectStatus.UNCLAIMED) {
+      await this.prisma.creatorProspect.update({
+        where: { id: prospect.id },
+        data: { status: ProspectStatus.CLAIM_PENDING },
+      });
+    }
+
+    const claimEmail = prospect.contactEmail?.trim().toLowerCase();
+    const href = this.mail.frontendUrl(`/claim/${raw}`);
+    if (claimEmail) {
+      await this.mail.sendBestEffort({
+        ...claimInviteMessage({
+          brandName: brief.brand.name,
+          handle: prospect.handle,
+          href,
+          note: input.message,
+          briefTitle: brief.title,
+          briefSummary: this.briefInviteCopy(brief, input.message),
+        }),
+        to: claimEmail,
+      });
+    }
+
     await this.audit(userId, 'brief.invite', 'BriefInvitation', invite.id);
     return invite;
+  }
+
+  private briefInviteCopy(
+    brief: { brand: { name: string }; title: string; description: string },
+    message?: string,
+  ) {
+    const summary = brief.description.replace(/\s+/g, ' ').trim().slice(0, 220);
+    return [
+      `${brief.brand.name} invited you to “${brief.title}”.`,
+      summary ? `${summary}${brief.description.trim().length > 220 ? '…' : ''}` : '',
+      message?.trim() || '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   async markInvitationViewed(creatorProfileId: string, briefId: string) {
