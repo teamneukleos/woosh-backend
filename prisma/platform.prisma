@@ -115,3 +115,13 @@ model Notification {
 
   @@index([userId, createdAt])
 }
+
+/// Resumable batch jobs (CSV Graph enrich, later cron).
+model JobCursor {
+  id         String   @id
+  lineOffset Int      @default(0)
+  lastHandle String?
+  status     String   @default("idle")
+  lastError  String?
+  updatedAt  DateTime @updatedAt
+}

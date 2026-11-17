@@ -22,6 +22,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx scripts/seed-demo.ts",
+    "graph:enrich": "tsx scripts/enrich-instagram-graph.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

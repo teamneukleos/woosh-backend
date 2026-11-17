@@ -1,0 +1,9 @@
+ALTER TABLE "CreatorProspect" ADD COLUMN "avatarUrl" TEXT;
+ALTER TABLE "CreatorProspect" ADD COLUMN "biography" TEXT;
+ALTER TABLE "CreatorProspect" ADD COLUMN "website" TEXT;
+ALTER TABLE "CreatorProspect" ADD COLUMN "mediaCount" INTEGER;
+ALTER TABLE "CreatorProspect" ADD COLUMN "engagementRate" DECIMAL(8,4);
+ALTER TABLE "CreatorProspect" ADD COLUMN "averageLikes" INTEGER;
+ALTER TABLE "CreatorProspect" ADD COLUMN "averageComments" INTEGER;
+ALTER TABLE "CreatorProspect" ADD COLUMN "averageViews" INTEGER;
+ALTER TABLE "CreatorProspect" ADD COLUMN "metricSampleSize" INTEGER;

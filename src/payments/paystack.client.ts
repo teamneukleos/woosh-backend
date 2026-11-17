@@ -20,6 +20,16 @@ export class PaystackError extends Error {
   }
 }
 
+export function paystackCustomerNotFound(error: unknown) {
+  if (!(error instanceof PaystackError)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    error.status === 404 ||
+    message.includes('not found') ||
+    message.includes('could not find')
+  );
+}
+
 export function paystackNeedsIdentification(message: string) {
   const lower = message.toLowerCase();
   return (
@@ -170,8 +180,11 @@ export async function verifyTransfer(reference: string) {
 }
 
 export async function getPaystackCustomer(emailOrCode: string) {
-  return paystackFetch<{ customer_code: string; email: string }>(
-    `/customer/${encodeURIComponent(emailOrCode)}`,
+  const path = emailOrCode.includes('@')
+    ? `/customer/${emailOrCode}`
+    : `/customer/${encodeURIComponent(emailOrCode)}`;
+  return paystackFetch<{ customer_code: string; email: string; id: number }>(
+    path,
   );
 }
 
@@ -212,7 +225,7 @@ export async function updatePaystackCustomer(
 }
 
 export async function createDedicatedVirtualAccount(input: {
-  customer: string;
+  customer: string | number;
   preferredBank?: string;
   firstName?: string;
   lastName?: string;
