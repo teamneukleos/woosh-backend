@@ -23,6 +23,7 @@ import {
   initializeTransaction,
   PaystackError,
   paystackConfigured,
+  paystackCustomerNotFound,
   paystackNeedsIdentification,
   paystackPublicKey,
   preferredDvaBank,
@@ -117,6 +118,74 @@ export class WalletService {
     });
   }
 
+  private async ensurePaystackCustomer(input: {
+    walletId: string;
+    storedCustomerCode: string | null;
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone: string;
+    brandId: string;
+    actorEmail: string;
+  }) {
+    const stored = input.storedCustomerCode?.startsWith('CUS_')
+      ? input.storedCustomerCode
+      : null;
+
+    const fetchCustomer = async (emailOrCode: string) => {
+      try {
+        return await getPaystackCustomer(emailOrCode);
+      } catch (error) {
+        if (paystackCustomerNotFound(error)) return null;
+        throw error;
+      }
+    };
+
+    let customer = stored ? await fetchCustomer(stored) : null;
+    if (!customer) customer = await fetchCustomer(input.email);
+    if (!customer) {
+      try {
+        customer = await createPaystackCustomer({
+          email: input.email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          phone: input.phone,
+          metadata: {
+            brandId: input.brandId,
+            actorEmail: input.actorEmail,
+            purpose: 'wallet_dva',
+          },
+        });
+      } catch (error) {
+        if (
+          error instanceof PaystackError &&
+          error.message.toLowerCase().includes('exist')
+        ) {
+          customer = await getPaystackCustomer(input.email);
+        } else {
+          throw error;
+        }
+      }
+    }
+    if (!customer) {
+      throw new BadRequestException('Could not create a Paystack customer for this brand.');
+    }
+
+    await updatePaystackCustomer(customer.customer_code, {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: input.phone,
+    });
+
+    if (customer.customer_code !== input.storedCustomerCode) {
+      await this.prisma.brandWallet.update({
+        where: { id: input.walletId },
+        data: { paystackCustomerCode: customer.customer_code },
+      });
+    }
+    return customer;
+  }
+
   async getOrCreateDva(input: {
     brandId: string;
     actorUserId: string;
@@ -177,39 +246,17 @@ export class WalletService {
     }
 
     const customerEmail = `wallet.${input.brandId}@pay.woosh.app`;
-    let customerCode = wallet.paystackCustomerCode;
-    if (!customerCode) {
-      let customer;
-      try {
-        customer = await createPaystackCustomer({
-          email: customerEmail,
-          firstName,
-          lastName,
-          phone,
-          metadata: {
-            brandId: input.brandId,
-            actorEmail: input.actorEmail,
-            purpose: 'wallet_dva',
-          },
-        });
-      } catch (error) {
-        if (
-          error instanceof PaystackError &&
-          error.message.toLowerCase().includes('exist')
-        ) {
-          customer = await getPaystackCustomer(customerEmail);
-        } else {
-          throw error;
-        }
-      }
-      customerCode = customer.customer_code;
-      await this.prisma.brandWallet.update({
-        where: { id: wallet.id },
-        data: { paystackCustomerCode: customerCode },
-      });
-    } else {
-      await updatePaystackCustomer(customerCode, { firstName, lastName, phone });
-    }
+    const customer = await this.ensurePaystackCustomer({
+      walletId: wallet.id,
+      storedCustomerCode: wallet.paystackCustomerCode,
+      email: customerEmail,
+      firstName,
+      lastName,
+      phone,
+      brandId: input.brandId,
+      actorEmail: input.actorEmail,
+    });
+    const customerCode = customer.customer_code;
 
     const identifying = Boolean(
       input.bvn && input.accountNumber && input.bankCode,
@@ -243,7 +290,7 @@ export class WalletService {
       }
 
       const assigned = await createDedicatedVirtualAccount({
-        customer: customerCode,
+        customer: customer.id || customerCode,
         firstName,
         lastName,
         phone,

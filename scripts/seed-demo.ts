@@ -2,7 +2,6 @@ import "dotenv/config";
 import { hash } from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { encryptAccountNumber } from "../src/payments/payout-account-crypto";
-import { DISCOVERY_CATALOG } from "./discovery-catalog";
 
 function cartoonAvatar(seed: string) {
   const value = seed.trim() || "woosh";
@@ -418,33 +417,6 @@ async function main() {
       },
     },
   });
-
-  const prospects = [];
-  for (const row of DISCOVERY_CATALOG) {
-    prospects.push(
-      await prisma.creatorProspect.upsert({
-        where: {
-          channel_handle: { channel: row.channel, handle: row.handle },
-        },
-        create: {
-          channel: row.channel,
-          handle: row.handle,
-          displayName: row.displayName,
-          locationCountry: "NG",
-          locationCity: row.locationCity,
-          categories: row.categories,
-          followerEstimate: row.followers,
-          status: "UNCLAIMED",
-        },
-        update: {
-          displayName: row.displayName,
-          locationCity: row.locationCity,
-          categories: row.categories,
-          followerEstimate: row.followers,
-        },
-      }),
-    );
-  }
 
   const brief = await prisma.brief.create({
     data: {
@@ -1027,7 +999,6 @@ async function main() {
     brandUser.memberships[0].organisation.brands[0].name,
   );
   console.log("  creator@", creator.email);
-  console.log("  prospects=", prospects.map((p) => p.handle).join(", "));
   console.log("  brief=", brief.title, brief.id);
   console.log("  password for all: password123");
 

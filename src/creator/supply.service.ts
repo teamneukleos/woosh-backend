@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ProspectStatus, SocialChannel } from '@prisma/client';
+import { Prisma, ProspectStatus, SocialChannel } from '@prisma/client';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
 import { MailService } from '../mail/mail.service';
@@ -24,12 +24,14 @@ type DiscoveryItem = {
   channel?: SocialChannel;
   channels?: SocialChannel[];
   handle?: string;
+  avatarUrl?: string | null;
   locationCountry?: string | null;
   locationCity?: string | null;
   categories: string[];
   followerEstimate?: number | null;
   followers?: number | null;
   engagementRate?: number | null;
+  averageLikes?: number | null;
   averageViews?: number | null;
   metricsVerified: boolean;
   verified: boolean;
@@ -635,6 +637,7 @@ export class SupplyService {
     const prospects = await this.prisma.creatorProspect.findMany({
       where: {
         status: { in: [ProspectStatus.UNCLAIMED, ProspectStatus.CLAIM_PENDING] },
+        graphStatus: 'ok',
         ...(filters.channel ? { channel: filters.channel } : {}),
         ...(filters.category ? { categories: { has: filters.category } } : {}),
         ...(filters.country ? { locationCountry: filters.country } : {}),
@@ -643,6 +646,9 @@ export class SupplyService {
           : {}),
         ...(filters.minFollowers
           ? { followerEstimate: { gte: filters.minFollowers } }
+          : {}),
+        ...(filters.minEngagement
+          ? { engagementRate: { gte: filters.minEngagement } }
           : {}),
         ...(q
           ? {
@@ -653,8 +659,8 @@ export class SupplyService {
             }
           : {}),
       },
-      take: 80,
-      orderBy: { updatedAt: 'desc' },
+      take: 120,
+      orderBy: [{ followerEstimate: 'desc' }, { updatedAt: 'desc' }],
     });
 
     return prospects.map((prospect) => ({
@@ -664,11 +670,15 @@ export class SupplyService {
       channel: prospect.channel,
       channels: [prospect.channel],
       handle: prospect.handle,
+      avatarUrl: prospect.avatarUrl,
       locationCountry: prospect.locationCountry,
       locationCity: prospect.locationCity,
       categories: prospect.categories,
       followerEstimate: prospect.followerEstimate,
       followers: prospect.followerEstimate,
+      engagementRate: asNumber(prospect.engagementRate),
+      averageLikes: prospect.averageLikes,
+      averageViews: prospect.averageViews,
       metricsVerified: false,
       verified: false,
       status: prospect.status,
@@ -743,6 +753,16 @@ export class SupplyService {
     followerEstimate: number | null;
     contactEmail: string | null;
     status: ProspectStatus;
+    avatarUrl?: string | null;
+    biography?: string | null;
+    website?: string | null;
+    mediaCount?: number | null;
+    engagementRate?: { toNumber?: () => number } | number | null;
+    averageLikes?: number | null;
+    averageComments?: number | null;
+    averageViews?: number | null;
+    metricSampleSize?: number | null;
+    graphPayload?: Prisma.JsonValue | null;
   }) {
     return {
       type: 'prospect' as const,
@@ -754,9 +774,47 @@ export class SupplyService {
       locationCity: prospect.locationCity,
       categories: prospect.categories,
       followerEstimate: prospect.followerEstimate,
+      followers: prospect.followerEstimate,
+      avatarUrl: prospect.avatarUrl ?? null,
+      biography: prospect.biography ?? null,
+      website: prospect.website ?? null,
+      mediaCount: prospect.mediaCount ?? null,
+      engagementRate: asNumber(prospect.engagementRate),
+      averageLikes: prospect.averageLikes ?? null,
+      averageComments: prospect.averageComments ?? null,
+      averageViews: prospect.averageViews ?? null,
+      metricSampleSize: prospect.metricSampleSize ?? null,
+      recentPosts: recentPostsFromPayload(prospect.graphPayload),
       metricsVerified: false,
       status: prospect.status,
       contactEmail: prospect.contactEmail,
     };
   }
+}
+
+function recentPostsFromPayload(payload: Prisma.JsonValue | null | undefined) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+  const media = (payload as { media?: { data?: Array<Record<string, unknown>> } }).media
+    ?.data;
+  if (!Array.isArray(media)) return [];
+  return media.slice(0, 3).map((post, index) => ({
+    id: typeof post.id === 'string' ? post.id : String(index),
+    mediaType:
+      typeof post.media_type === 'string'
+        ? post.media_type
+        : typeof post.media_product_type === 'string'
+          ? post.media_product_type
+          : null,
+    permalink: typeof post.permalink === 'string' ? post.permalink : null,
+    imageUrl:
+      typeof post.thumbnail_url === 'string'
+        ? post.thumbnail_url
+        : typeof post.media_url === 'string'
+          ? post.media_url
+          : null,
+    likeCount: typeof post.like_count === 'number' ? post.like_count : null,
+    commentsCount:
+      typeof post.comments_count === 'number' ? post.comments_count : null,
+    timestamp: typeof post.timestamp === 'string' ? post.timestamp : null,
+  }));
 }
