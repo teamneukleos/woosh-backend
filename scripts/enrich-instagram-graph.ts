@@ -61,6 +61,18 @@ function isRateLimited(status: number, body: { error?: { code?: number; message?
   );
 }
 
+function isExpiredToken(body: { error?: { code?: number; message?: string } }) {
+  const code = body.error?.code;
+  const message = (body.error?.message ?? "").toLowerCase();
+  return (
+    code === 190 ||
+    code === 102 ||
+    message.includes("expired") ||
+    message.includes("session has expired") ||
+    message.includes("invalid oauth")
+  );
+}
+
 function graphUrl(igUserId: string, handle: string, token: string, version: string) {
   const params = new URLSearchParams({
     fields: DISCOVERY_FIELDS.replace("{handle}", handle),
@@ -95,6 +107,7 @@ async function main() {
   const delayMs = Number(process.env.META_GRAPH_DELAY_MS ?? "400");
   const reset = process.argv.includes("--reset");
   const retryErrors = process.argv.includes("--retry-errors");
+  const force = process.argv.includes("--force");
 
   if (!igUserId || !token) {
     throw new Error(
@@ -159,6 +172,7 @@ async function main() {
         continue;
       }
       if (
+        !force &&
         existing?.graphStatus === "ok" &&
         existing.engagementRate != null &&
         discoveryHasPreviewMedia(existing.graphPayload as GraphDiscovery)
@@ -168,7 +182,7 @@ async function main() {
         processed += 1;
         continue;
       }
-      if (existing?.graphStatus === "error" && !retryErrors) {
+      if (!force && existing?.graphStatus === "error" && !retryErrors) {
         skipped += 1;
         skip = dataRow;
         processed += 1;
@@ -185,6 +199,10 @@ async function main() {
       if (isRateLimited(status, body)) {
         stoppedForRateLimit = true;
         lastError = body.error?.message ?? "Graph rate limit";
+        break;
+      }
+      if (isExpiredToken(body)) {
+        lastError = body.error?.message ?? "Meta access token expired";
         break;
       }
 
@@ -250,13 +268,20 @@ async function main() {
       }
     }
 
-    const done = !stoppedForRateLimit && processed < limit;
+    const tokenExpired = Boolean(lastError?.toLowerCase().includes("expired"));
+    const done = !stoppedForRateLimit && !tokenExpired && processed < limit;
     await prisma.jobCursor.update({
       where: { id: JOB_ID },
       data: {
         lineOffset: skip,
         lastHandle,
-        status: stoppedForRateLimit ? "rate_limited" : done ? "done" : "idle",
+        status: tokenExpired
+          ? "token_expired"
+          : stoppedForRateLimit
+            ? "rate_limited"
+            : done
+              ? "done"
+              : "idle",
         lastError,
       },
     });
