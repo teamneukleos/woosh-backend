@@ -10,7 +10,13 @@ export type AuthedRequest = {
 export const CurrentWorkspace = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): WorkspaceSnapshot => {
     const request = ctx.switchToHttp().getRequest<AuthedRequest>();
-    if (!request.workspace?.organisation) {
+    if (!request.workspace) {
+      throw new ForbiddenException('Organisation workspace required.');
+    }
+    if (
+      !request.workspace.organisation &&
+      !request.workspace.user.isPlatformAdmin
+    ) {
       throw new ForbiddenException('Organisation workspace required.');
     }
     return request.workspace;

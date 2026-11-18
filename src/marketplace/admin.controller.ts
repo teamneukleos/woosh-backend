@@ -82,6 +82,16 @@ export class AdminController {
     return this.ops.listPendingBriefs(user.id);
   }
 
+  @Get('briefs/invites')
+  @ApiOperation({
+    summary: 'Recent brief invitations',
+    description:
+      'Platform ops list so unclaimed handles can be reached manually (Instagram, email if stored).',
+  })
+  briefInvites(@CurrentUser() user: { id: string }) {
+    return this.ops.listBriefInvites(user.id);
+  }
+
   @Get('organisations')
   @ApiOperation({ summary: 'Organisations for verification' })
   organisations(@CurrentUser() user: { id: string }) {

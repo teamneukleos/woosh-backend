@@ -132,7 +132,10 @@ export class OrganisationService {
   }
 
   async listTeam(ctx: WorkspaceSnapshot) {
-    const organisationId = ctx.organisation!.id;
+    if (!ctx.organisation) {
+      throw new ForbiddenException('Organisation workspace required.');
+    }
+    const organisationId = ctx.organisation.id;
     const [members, pendingInvites, orgBrands] = await Promise.all([
       this.prisma.membership.findMany({
         where: { organisationId },

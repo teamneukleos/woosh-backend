@@ -225,7 +225,7 @@ export class ClaimService {
           userId: user.id,
           type: 'brief.invited',
           title: `${pending.brief.brand.name} invited you to ${pending.brief.title}`,
-          body: `${pending.brief.brand.name} invited you to “${pending.brief.title}”. Finish your profile and submit it for review before you can apply.`,
+          body: `${pending.brief.brand.name} invited you to “${pending.brief.title}”. Finish your profile setup before you can apply.`,
           href: `/app/jobs/${pending.brief.id}`,
           dedupeKey: `brief-invite:${pending.id}:${profile.id}`,
         },

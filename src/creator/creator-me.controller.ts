@@ -94,9 +94,9 @@ export class CreatorMeController {
 
   @Post('submit-review')
   @ApiOperation({
-    summary: 'Submit profile for marketplace review',
+    summary: 'Activate the profile if the readiness checklist is complete',
     description:
-      'Requires live connected metrics, a rate package, and three approved portfolio items.',
+      'No platform review. A 100% complete profile is PUBLISHED (active) immediately.',
   })
   submit(
     @CurrentCreatorId() creatorProfileId: string,
