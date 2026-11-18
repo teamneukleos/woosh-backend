@@ -136,17 +136,37 @@ export class BriefsService {
 
   async listForBrand(userId: string, brandId?: string) {
     if (!brandId) {
-      throw new BadRequestException('Select a brand first (brandId or X-Brand-Id).');
+      const actor = await this.workspace.getWorkActor(userId);
+      if (!actor.isPlatformAdmin) {
+        throw new BadRequestException('Select a brand first (brandId or X-Brand-Id).');
+      }
+      const briefs = await this.prisma.brief.findMany({
+        include: {
+          _count: { select: { applications: true } },
+          brand: { select: { id: true, name: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 200,
+      });
+      return briefs.map((brief) => ({
+        ...this.presentBrief(brief),
+        applicationCount: brief._count.applications,
+        brand: brief.brand,
+      }));
     }
     await this.workspace.requireBrandAccess(userId, brandId);
     const briefs = await this.prisma.brief.findMany({
       where: { brandId },
-      include: { _count: { select: { applications: true } } },
+      include: {
+        _count: { select: { applications: true } },
+        brand: { select: { id: true, name: true } },
+      },
       orderBy: { updatedAt: 'desc' },
     });
     return briefs.map((brief) => ({
       ...this.presentBrief(brief),
       applicationCount: brief._count.applications,
+      brand: brief.brand,
     }));
   }
 

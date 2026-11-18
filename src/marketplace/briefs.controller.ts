@@ -27,7 +27,10 @@ export class BriefsController {
 
   @Get()
   @RequireOrg()
-  @ApiOperation({ summary: 'List briefs for the active brand' })
+  @ApiOperation({
+    summary: 'List briefs for the active brand',
+    description: 'Platform admins with no brand header see recent briefs across all brands.',
+  })
   list(
     @CurrentUser() user: { id: string },
     @Query('brandId') brandId?: string,

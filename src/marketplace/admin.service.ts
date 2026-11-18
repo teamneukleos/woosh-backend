@@ -80,6 +80,98 @@ export class AdminOpsService {
     return { count };
   }
 
+  async listBriefInvites(adminId: string) {
+    await this.workspace.requirePlatformAdmin(adminId);
+    const rows = await this.prisma.briefInvitation.findMany({
+      include: {
+        brief: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            distribution: true,
+            brand: {
+              select: {
+                id: true,
+                name: true,
+                organisation: { select: { publicName: true, type: true } },
+              },
+            },
+          },
+        },
+        creator: {
+          select: {
+            id: true,
+            displayName: true,
+            socialAccounts: {
+              select: { channel: true, handle: true },
+              take: 4,
+            },
+          },
+        },
+        prospect: {
+          select: {
+            id: true,
+            handle: true,
+            displayName: true,
+            channel: true,
+            status: true,
+            contactEmail: true,
+            website: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    return rows
+      .map((row) => {
+        const claimed = Boolean(row.creatorProfileId && row.creator);
+        const handle =
+          row.prospect?.handle ||
+          row.creator?.socialAccounts.find((account) => account.handle)?.handle ||
+          null;
+        const channel =
+          row.prospect?.channel ||
+          row.creator?.socialAccounts.find((account) => account.channel)?.channel ||
+          null;
+        const contactEmail = row.prospect?.contactEmail?.trim() || null;
+        const needsManualOutreach = !claimed && !contactEmail;
+        return {
+          id: row.id,
+          status: row.status,
+          message: row.message,
+          createdAt: row.createdAt,
+          viewedAt: row.viewedAt,
+          claimed,
+          needsManualOutreach,
+          brief: {
+            id: row.brief.id,
+            title: row.brief.title,
+            status: row.brief.status,
+            distribution: row.brief.distribution,
+          },
+          brand: row.brief.brand,
+          creator: row.creator
+            ? { id: row.creator.id, displayName: row.creator.displayName }
+            : null,
+          prospect: row.prospect
+            ? {
+                id: row.prospect.id,
+                handle: row.prospect.handle,
+                displayName: row.prospect.displayName,
+                status: row.prospect.status,
+              }
+            : null,
+          contactEmail,
+          profileUrl: socialProfileUrl(channel, handle),
+          handle,
+        };
+      })
+      .sort((a, b) => Number(b.needsManualOutreach) - Number(a.needsManualOutreach));
+  }
+
   async verifyOrganisation(
     adminId: string,
     organisationId: string,
@@ -163,4 +255,12 @@ export class AdminOpsService {
     }
     return { upserted, skipped };
   }
+}
+
+function socialProfileUrl(channel: string | null, handle: string | null) {
+  const slug = handle?.trim().replace(/^@+/, '');
+  if (!slug) return null;
+  if (channel === 'TIKTOK') return `https://www.tiktok.com/@${slug}`;
+  if (channel === 'YOUTUBE') return `https://www.youtube.com/@${slug}`;
+  return `https://www.instagram.com/${slug}/`;
 }

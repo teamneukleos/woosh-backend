@@ -177,12 +177,12 @@ export class WorkspaceService {
   async requireOrganisation(
     userId: string,
     preferredBrandId?: string,
-  ): Promise<WorkspaceSnapshot & { organisation: OrganisationSnapshot }> {
+  ): Promise<WorkspaceSnapshot> {
     const ctx = await this.getContext(userId, preferredBrandId);
-    if (!ctx.organisation) {
+    if (!ctx.organisation && !ctx.user.isPlatformAdmin) {
       throw new ForbiddenException('Organisation workspace required.');
     }
-    return ctx as WorkspaceSnapshot & { organisation: OrganisationSnapshot };
+    return ctx;
   }
 
   async requirePermission(
@@ -191,10 +191,10 @@ export class WorkspaceService {
     preferredBrandId?: string,
   ) {
     const ctx = await this.requireOrganisation(userId, preferredBrandId);
+    if (ctx.user.isPlatformAdmin) return ctx;
     const allowed =
-      ctx.user.isPlatformAdmin ||
-      (ctx.membership != null &&
-        hasPermission(ctx.membership.role, permission, ctx.membership));
+      ctx.membership != null &&
+      hasPermission(ctx.membership.role, permission, ctx.membership);
     if (!allowed) {
       throw new ForbiddenException('You do not have permission for this action.');
     }

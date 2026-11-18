@@ -17,6 +17,7 @@ export class CreatorProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMine(creatorProfileId: string) {
+    await this.syncMarketplaceStatus(creatorProfileId);
     const profile = await this.loadOwn(creatorProfileId);
     return this.presentOwn(profile);
   }
@@ -68,6 +69,28 @@ export class CreatorProfileService {
   }
 
   async submitForReview(creatorProfileId: string, userId: string) {
+    await this.syncMarketplaceStatus(creatorProfileId);
+    const presented = await this.getMine(creatorProfileId);
+    if (presented.marketplaceStatus !== 'PUBLISHED') {
+      const missing = presented.readiness.checks
+        .filter((check) => !check.complete)
+        .map((check) => check.label);
+      throw new BadRequestException(
+        `Complete your profile first: ${missing.join(', ')}`,
+      );
+    }
+    await this.prisma.auditEvent.create({
+      data: {
+        actorId: userId,
+        action: 'creator.profile.auto_publish',
+        targetType: 'CreatorProfile',
+        targetId: creatorProfileId,
+      },
+    });
+    return presented;
+  }
+
+  async syncMarketplaceStatus(creatorProfileId: string) {
     const profile = await this.loadOwn(creatorProfileId);
     const readiness = creatorReadiness({
       ...profile,
@@ -79,32 +102,47 @@ export class CreatorProfileService {
         })),
       })),
     });
-    if (!readiness.complete) {
-      throw new BadRequestException(
-        `Complete your profile first: ${readiness.checks
-          .filter((check) => !check.complete)
-          .map((check) => check.label)
-          .join(', ')}`,
-      );
+    if (readiness.complete) {
+      if (profile.marketplaceStatus === 'PUBLISHED' && profile.profileVisible) {
+        return;
+      }
+      await this.prisma.creatorProfile.update({
+        where: { id: profile.id },
+        data: {
+          marketplaceStatus: 'PUBLISHED',
+          profileVisible: true,
+          submittedAt: profile.submittedAt ?? new Date(),
+          moderationNotes: null,
+        },
+      });
+      if (profile.marketplaceStatus !== 'PUBLISHED') {
+        await this.prisma.notification.upsert({
+          where: { dedupeKey: `creator-live:${profile.id}` },
+          create: {
+            userId: profile.userId,
+            type: 'creator.approved',
+            title: 'Your creator profile is live',
+            body: 'Your profile is complete. Brands can now discover you and you can apply to briefs.',
+            href: '/app/profile',
+            dedupeKey: `creator-live:${profile.id}`,
+          },
+          update: { readAt: null },
+        });
+      }
+      return;
     }
-    await this.prisma.creatorProfile.update({
-      where: { id: profile.id },
-      data: {
-        marketplaceStatus: 'PENDING_REVIEW',
-        submittedAt: new Date(),
-        profileVisible: false,
-        moderationNotes: null,
-      },
-    });
-    await this.prisma.auditEvent.create({
-      data: {
-        actorId: userId,
-        action: 'creator.profile.submit_review',
-        targetType: 'CreatorProfile',
-        targetId: profile.id,
-      },
-    });
-    return this.getMine(creatorProfileId);
+    if (
+      profile.marketplaceStatus === 'PUBLISHED' ||
+      profile.marketplaceStatus === 'PENDING_REVIEW'
+    ) {
+      await this.prisma.creatorProfile.update({
+        where: { id: profile.id },
+        data: {
+          marketplaceStatus: 'DRAFT',
+          profileVisible: false,
+        },
+      });
+    }
   }
 
   async createRate(creatorProfileId: string, userId: string, input: CreateRatePackageDto) {

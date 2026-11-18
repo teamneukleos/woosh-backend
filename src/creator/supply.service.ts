@@ -170,6 +170,9 @@ export class SupplyService {
 
   async saveCreator(userId: string, id: string, brandId?: string) {
     const ctx = await this.workspace.requireOrganisation(userId, brandId);
+    if (!ctx.organisation) {
+      throw new ForbiddenException('Organisation workspace required.');
+    }
     const profile = await this.prisma.creatorProfile.findUnique({
       where: { id },
       select: { id: true },
@@ -216,6 +219,9 @@ export class SupplyService {
 
   async unsaveCreator(userId: string, id: string) {
     const ctx = await this.workspace.requireOrganisation(userId);
+    if (!ctx.organisation) {
+      throw new ForbiddenException('Organisation workspace required.');
+    }
     const items = await this.prisma.creatorListItem.findMany({
       where: {
         list: { organisationId: ctx.organisation.id },

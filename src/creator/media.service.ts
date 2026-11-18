@@ -43,8 +43,6 @@ export class MediaService {
       folder: `creators/${creatorProfileId}/${kind}`,
     });
     const oldKey = kind === 'avatar' ? profile.avatarStorageKey : profile.coverStorageKey;
-    const demotePublished =
-      profile.marketplaceStatus === 'PUBLISHED' ? 'PENDING_REVIEW' : profile.marketplaceStatus;
 
     await this.prisma.creatorProfile.update({
       where: { id: creatorProfileId },
@@ -53,14 +51,12 @@ export class MediaService {
           ? {
               avatarUrl: stored.url,
               avatarStorageKey: stored.key,
-              avatarStatus: CreatorMediaStatus.PENDING,
-              marketplaceStatus: demotePublished,
+              avatarStatus: CreatorMediaStatus.APPROVED,
             }
           : {
               coverUrl: stored.url,
               coverStorageKey: stored.key,
-              coverStatus: CreatorMediaStatus.PENDING,
-              marketplaceStatus: demotePublished,
+              coverStatus: CreatorMediaStatus.APPROVED,
             },
     });
     await this.storage.remove(oldKey);
@@ -187,10 +183,6 @@ export class MediaService {
         campaignType: input.campaignType,
         brandName: input.brandName,
         tags: input.tags ?? [],
-        status:
-          existing.status === CreatorMediaStatus.APPROVED
-            ? CreatorMediaStatus.PENDING
-            : existing.status,
         moderationNotes: null,
       },
     });
@@ -267,6 +259,7 @@ export class MediaService {
       item.id,
       { reason },
     );
+    await this.profiles.syncMarketplaceStatus(item.creatorProfileId);
     return {
       id: updated.id,
       status: updated.status,
@@ -338,7 +331,7 @@ export class MediaService {
         mimeType: data.mimeType,
         fileSizeBytes: data.fileSizeBytes,
         sortOrder: count,
-        status: CreatorMediaStatus.PENDING,
+        status: CreatorMediaStatus.APPROVED,
       },
     });
   }

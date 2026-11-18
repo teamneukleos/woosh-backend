@@ -42,7 +42,7 @@ export function creatorReadiness(profile: {
     },
     {
       id: 'portfolio',
-      label: 'Add three approved portfolio samples',
+      label: 'Add three portfolio samples',
       complete:
         profile.portfolioItems.filter((item) => item.status === 'APPROVED').length >= 3,
     },
