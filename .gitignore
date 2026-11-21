@@ -26,6 +26,14 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# local agent / editor tooling
+.claude/
+.vscode/
+.mcp.json
+skills-lock.json
+scripts/_apify-*
+scripts/_csv-*
+
 # IDE
 .idea
 .project

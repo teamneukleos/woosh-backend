@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 import { CREATOR_CATEGORIES, SOCIAL_CHANNELS } from '../../common/taxonomy';
@@ -92,4 +93,22 @@ export class DiscoveryQueryDto {
   @IsOptional()
   @IsIn(['newest', 'followers', 'engagement', 'views', 'price'])
   sort?: 'newest' | 'followers' | 'engagement' | 'views' | 'price';
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({
+    default: 100,
+    description: 'Page size for mixed discovery. Filters always apply to the full matching set.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  pageSize?: number;
 }
