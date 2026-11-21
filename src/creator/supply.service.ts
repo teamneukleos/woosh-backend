@@ -57,9 +57,16 @@ export class SupplyService {
     userId: string,
     filters: DiscoveryQueryDto,
     brandId?: string,
-  ): Promise<DiscoveryItem[]> {
+  ): Promise<{
+    items: DiscoveryItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
     const items: DiscoveryItem[] = [];
     const q = filters.q?.trim().toLowerCase();
+    const pageSize = Math.min(Math.max(filters.pageSize ?? 100, 1), 2000);
+    const requestedPage = Math.max(filters.page ?? 1, 1);
 
     if (!filters.prospectOnly) {
       items.push(...(await this.listClaimed(filters, q)));
@@ -85,24 +92,61 @@ export class SupplyService {
       });
     }
 
+    let ranked = items;
+    if (filters.savedOnly) {
+      const flags = await this.loadRelationshipFlags(
+        userId,
+        brandId,
+        items.filter((item) => item.type === 'claimed').map((item) => item.id),
+        items.filter((item) => item.type === 'prospect').map((item) => item.id),
+      );
+      ranked = items
+        .map((item) => this.withRelationshipFlags(item, flags))
+        .filter((item) => item.saved);
+    }
+
+    const total = ranked.length;
+    const page = Math.min(
+      requestedPage,
+      Math.max(1, Math.ceil(total / pageSize) || 1),
+    );
+    const start = (page - 1) * pageSize;
+    const pageItems = ranked.slice(start, start + pageSize);
+
+    if (filters.savedOnly) {
+      return { items: pageItems, total, page, pageSize };
+    }
+
     const flags = await this.loadRelationshipFlags(
       userId,
       brandId,
-      items.filter((item) => item.type === 'claimed').map((item) => item.id),
-      items.filter((item) => item.type === 'prospect').map((item) => item.id),
+      pageItems.filter((item) => item.type === 'claimed').map((item) => item.id),
+      pageItems.filter((item) => item.type === 'prospect').map((item) => item.id),
     );
-    const withFlags = items.map((item) => ({
+    return {
+      items: pageItems.map((item) => this.withRelationshipFlags(item, flags)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  private withRelationshipFlags(
+    item: DiscoveryItem,
+    flags: {
+      saved: Set<string>;
+      interestedCreators: Set<string>;
+      interestedProspects: Set<string>;
+    },
+  ): DiscoveryItem {
+    return {
       ...item,
       saved: flags.saved.has(item.id),
       interested:
         item.type === 'prospect'
           ? flags.interestedProspects.has(item.id)
           : flags.interestedCreators.has(item.id),
-    }));
-    if (filters.savedOnly) {
-      return withFlags.filter((item) => item.saved);
-    }
-    return withFlags;
+    };
   }
 
   async createProspect(userId: string, input: CreateProspectDto) {
@@ -565,6 +609,11 @@ export class SupplyService {
               OR: [
                 { displayName: { contains: q, mode: 'insensitive' } },
                 { bio: { contains: q, mode: 'insensitive' } },
+                {
+                  socialAccounts: {
+                    some: { handle: { contains: q, mode: 'insensitive' } },
+                  },
+                },
               ],
             }
           : {}),
@@ -590,7 +639,6 @@ export class SupplyService {
           take: 1,
         },
       },
-      take: 80,
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -652,21 +700,50 @@ export class SupplyService {
           : {}),
         ...(filters.minFollowers
           ? { followerEstimate: { gte: filters.minFollowers } }
-          : {}),
+          : { followerEstimate: { not: null } }),
         ...(filters.minEngagement
           ? { engagementRate: { gte: filters.minEngagement } }
+          : {
+              OR: [
+                { engagementRate: { gt: 0 } },
+                { averageLikes: { gt: 0 } },
+              ],
+            }),
+        ...(filters.minAverageViews
+          ? { averageViews: { gte: filters.minAverageViews } }
           : {}),
         ...(q
           ? {
-              OR: [
-                { handle: { contains: q, mode: 'insensitive' } },
-                { displayName: { contains: q, mode: 'insensitive' } },
+              AND: [
+                {
+                  OR: [
+                    { handle: { contains: q, mode: 'insensitive' } },
+                    { displayName: { contains: q, mode: 'insensitive' } },
+                  ],
+                },
               ],
             }
           : {}),
       },
-      take: 120,
-      orderBy: [{ followerEstimate: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        id: true,
+        channel: true,
+        handle: true,
+        displayName: true,
+        avatarUrl: true,
+        locationCountry: true,
+        locationCity: true,
+        categories: true,
+        followerEstimate: true,
+        engagementRate: true,
+        averageLikes: true,
+        averageViews: true,
+        status: true,
+      },
+      orderBy: [
+        { followerEstimate: { sort: 'desc', nulls: 'last' } },
+        { updatedAt: 'desc' },
+      ],
     });
 
     return prospects.map((prospect) => ({
@@ -683,8 +760,8 @@ export class SupplyService {
       followerEstimate: prospect.followerEstimate,
       followers: prospect.followerEstimate,
       engagementRate: asNumber(prospect.engagementRate),
-      averageLikes: prospect.averageLikes,
-      averageViews: prospect.averageViews,
+      averageLikes: nonNegativeInt(prospect.averageLikes),
+      averageViews: nonNegativeInt(prospect.averageViews),
       metricsVerified: false,
       verified: false,
       status: prospect.status,
@@ -786,9 +863,9 @@ export class SupplyService {
       website: prospect.website ?? null,
       mediaCount: prospect.mediaCount ?? null,
       engagementRate: asNumber(prospect.engagementRate),
-      averageLikes: prospect.averageLikes ?? null,
-      averageComments: prospect.averageComments ?? null,
-      averageViews: prospect.averageViews ?? null,
+      averageLikes: nonNegativeInt(prospect.averageLikes),
+      averageComments: nonNegativeInt(prospect.averageComments),
+      averageViews: nonNegativeInt(prospect.averageViews),
       metricSampleSize: prospect.metricSampleSize ?? null,
       recentPosts: recentPostsFromPayload(prospect.graphPayload),
       metricsVerified: false,
@@ -796,6 +873,11 @@ export class SupplyService {
       contactEmail: prospect.contactEmail,
     };
   }
+}
+
+function nonNegativeInt(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value < 0) return null;
+  return value;
 }
 
 function recentPostsFromPayload(payload: Prisma.JsonValue | null | undefined) {
