@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.vscode
+node_modules
+dist
+coverage
+uploads
+.env
+.env.*
+!.env.example
+scripts/_apify-*
+scripts/_csv-*
+Dockerfile
+.dockerignore

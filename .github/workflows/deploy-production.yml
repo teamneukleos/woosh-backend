@@ -1,0 +1,53 @@
+name: Deploy production
+
+# Builds the API image, pushes it to ECR and rolls the ECS service.
+# Configure the GitHub environment "production" with the variables printed by
+# `terraform output github_backend_variables` in woosh-infra. Until
+# AWS_DEPLOY_ROLE_ARN is set, this workflow skips itself.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}
+        run: |
+          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:production" .
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:production"
+
+      - name: Roll out ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --service "${{ vars.ECS_SERVICE }}" \
+            --force-new-deployment > /dev/null
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.ECS_SERVICE }}"
