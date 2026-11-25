@@ -14,6 +14,7 @@ import {
   RateMode,
   SocialChannel,
 } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
 import { MailService } from '../mail/mail.service';
 import { claimInviteMessage } from '../mail/templates';
@@ -31,6 +32,20 @@ export class BriefsService {
     private readonly workspace: WorkspaceService,
     private readonly mail: MailService,
   ) {}
+  @Cron(CronExpression.EVERY_MINUTE)
+  async closeExpiredBriefs() {
+    const now = new Date();
+
+    await this.prisma.brief.updateMany({
+      where: {
+        status: { in: [BriefStatus.OPEN, BriefStatus.SELECTING] },
+        applicationDeadline: { lt: now },
+      },
+      data: {
+        status: BriefStatus.CLOSED,
+      },
+    });
+  }
 
   async create(userId: string, input: CreateBriefDto, headerBrandId?: string) {
     const brandId = input.brandId || headerBrandId;
@@ -56,7 +71,9 @@ export class BriefsService {
         channels: (input.channels as SocialChannel[]) ?? [],
         deliverables: input.deliverables as Prisma.InputJsonValue | undefined,
         applicationDeadline: input.applicationDeadline
-          ? new Date(input.applicationDeadline)
+          ? /^\d{4}-\d{2}-\d{2}$/.test(input.applicationDeadline)
+            ? new Date(`${input.applicationDeadline}T23:59:59.999`)
+            : new Date(input.applicationDeadline)
           : undefined,
         maxCreators: input.maxCreators,
         eligibility: input.eligibility as Prisma.InputJsonValue | undefined,
@@ -576,6 +593,36 @@ export class BriefsService {
     );
     return this.presentBrief(updated);
   }
+
+  async closeBrief(userId: string, briefId: string) {
+  const brief = await this.prisma.brief.findUnique({
+    where: { id: briefId },
+  });
+
+  if (!brief) throw new NotFoundException('Brief not found.');
+
+  await this.workspace.requireBrandPermission(
+    userId,
+    brief.brandId,
+    'briefs.manage',
+  );
+
+  if (
+    brief.status !== BriefStatus.OPEN &&
+    brief.status !== BriefStatus.SELECTING
+  ) {
+    throw new BadRequestException('This brief cannot be closed from its current status.');
+  }
+
+  const updated = await this.prisma.brief.update({
+    where: { id: briefId },
+    data: { status: BriefStatus.CLOSED },
+  });
+
+  await this.audit(userId, 'brief.close', 'Brief', briefId);
+
+  return this.presentBrief(updated);
+}
 
   presentBrief(brief: {
     id: string;

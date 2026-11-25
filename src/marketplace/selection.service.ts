@@ -327,10 +327,15 @@ export class SelectionService {
           campaignParticipantId: participant.id,
         })),
       });
-      await tx.brief.update({
-        where: { id: application.briefId },
-        data: { status: BriefStatus.SELECTING },
-      });
+     await tx.brief.update({
+      where: { id: application.briefId },
+      data: {
+        status:
+          application.brief.status === BriefStatus.CLOSED
+            ? BriefStatus.CLOSED
+            : BriefStatus.SELECTING,
+      },
+    });
       return tx.campaign.findUniqueOrThrow({
         where: { id: created.id },
         include: { participants: true, deliverables: true },

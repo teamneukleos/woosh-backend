@@ -1,5 +1,8 @@
+
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CampaignModule } from './campaign/campaign.module';
 import { CreatorModule } from './creator/creator.module';
@@ -17,6 +20,7 @@ import { StorageModule } from './storage/storage.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     MailModule,
     StorageModule,
