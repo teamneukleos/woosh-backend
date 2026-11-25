@@ -68,13 +68,27 @@ export class SupplyService {
     const pageSize = Math.min(Math.max(filters.pageSize ?? 100, 1), 2000);
     const requestedPage = Math.max(filters.page ?? 1, 1);
 
-    if (!filters.prospectOnly) {
-      items.push(...(await this.listClaimed(filters, q)));
-    }
-    if (!filters.claimedOnly) {
-      items.push(...(await this.listProspects(filters, q)));
-    }
+   const claimedStart = performance.now();
+    const prospectsStart = performance.now();
 
+    const [claimedItems, prospectItems] = await Promise.all([
+      filters.prospectOnly
+        ? Promise.resolve([])
+        : this.listClaimed(filters, q).finally(() => {
+            console.log(
+              `[Creator Discovery] Claimed query: ${Math.round(performance.now() - claimedStart)}ms`,
+            );
+          }),
+      filters.claimedOnly
+        ? Promise.resolve([])
+        : this.listProspects(filters, q).finally(() => {
+            console.log(
+              `[Creator Discovery] Prospect query: ${Math.round(performance.now() - prospectsStart)}ms`,
+            );
+          }),
+    ]);
+
+items.push(...claimedItems, ...prospectItems);
     if (filters.sort && filters.sort !== 'newest') {
       items.sort((a, b) => {
         if (filters.sort === 'price') {
@@ -586,6 +600,87 @@ export class SupplyService {
       })),
     };
   }
+
+  async searchDiscoverySuggestions(q: string) {
+  const query = q.trim();
+
+  if (query.length < 2) return [];
+
+  const [claimed, prospects] = await Promise.all([
+    this.prisma.creatorProfile.findMany({
+      where: {
+        profileVisible: true,
+        marketplaceStatus: 'PUBLISHED',
+        socialAccounts: {
+          some: {
+            status: 'ACTIVE',
+          },
+        },
+        OR: [
+          { displayName: { contains: query, mode: 'insensitive' } },
+          {
+            socialAccounts: {
+              some: {
+                status: 'ACTIVE',
+                handle: { contains: query, mode: 'insensitive' },
+              },
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        displayName: true,
+        socialAccounts: {
+          where: { status: 'ACTIVE' },
+          select: {
+            handle: true,
+            channel: true,
+          },
+          take: 1,
+        },
+      },
+      take: 8,
+    }),
+
+    this.prisma.creatorProspect.findMany({
+      where: {
+        status: {
+          in: [ProspectStatus.UNCLAIMED, ProspectStatus.CLAIM_PENDING],
+        },
+        graphStatus: 'ok',
+        OR: [
+          { handle: { contains: query, mode: 'insensitive' } },
+          { displayName: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        handle: true,
+        displayName: true,
+        channel: true,
+      },
+      take: 8,
+    }),
+  ]);
+
+  return [
+    ...claimed.map((creator) => ({
+      id: creator.id,
+      type: 'claimed' as const,
+      displayName: creator.displayName,
+      handle: creator.socialAccounts[0]?.handle,
+      channel: creator.socialAccounts[0]?.channel,
+    })),
+    ...prospects.map((creator) => ({
+      id: creator.id,
+      type: 'prospect' as const,
+      displayName: creator.displayName || `@${creator.handle}`,
+      handle: creator.handle,
+      channel: creator.channel,
+    })),
+  ].slice(0, 8);
+}
 
   private async listClaimed(filters: DiscoveryQueryDto, q?: string): Promise<DiscoveryItem[]> {
     const profiles = await this.prisma.creatorProfile.findMany({

@@ -46,6 +46,13 @@ export class SupplyController {
     return this.supply.listDiscovery(user.id, query, brandId);
   }
 
+    @Get('discovery/suggestions')
+    @RequirePermission('creators.search')
+    @ApiOperation({ summary: 'Lightweight creator search suggestions' })
+    discoverySuggestions(@Query('q') q = '') {
+    return this.supply.searchDiscoverySuggestions(q);
+  }
+
   @Post('prospects')
   @RequirePermission('creators.search')
   @ApiOperation({
