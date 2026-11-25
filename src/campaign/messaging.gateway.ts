@@ -91,10 +91,23 @@ export class MessagingGateway
     return { ok: true };
   }
 
-  emitMessage(payload: RealtimeMessagePayload) {
+   emitMessage(
+    payload: RealtimeMessagePayload,
+    recipientIds: string[] = [],
+  ) {
     this.server
       .to(`conversation:${payload.conversationId}`)
       .emit('message.new', payload);
+
+    // Notify each recipient's personal room for unread badge updates.
+    for (const recipientId of recipientIds) {
+      this.server
+        .to(`user:${recipientId}`)
+        .emit('message.unread', {
+          conversationId: payload.conversationId,
+          messageId: payload.message.id,
+        });
+    }
   }
 
   private tokenFrom(client: Socket) {

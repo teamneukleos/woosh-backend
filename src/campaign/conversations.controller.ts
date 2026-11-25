@@ -1,3 +1,4 @@
+
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -16,6 +17,12 @@ export class ConversationsController {
   @ApiOperation({ summary: 'Inbox: application, campaign, and support threads' })
   list(@CurrentUser() user: { id: string }) {
     return this.messaging.list(user.id);
+  }
+
+  @Get('unread-count')
+  @ApiOperation({ summary: 'Count unread incoming messages' })
+  unreadCount(@CurrentUser() user: { id: string }) {
+    return this.messaging.unreadCount(user.id);
   }
 
   @Get(':id')

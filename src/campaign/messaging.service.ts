@@ -74,6 +74,31 @@ export class MessagingService {
       take: 40,
     });
 
+    const conversationIds = conversations.map((conversation) => conversation.id);
+
+    const unreadGroups = conversationIds.length
+      ? await this.prisma.message.groupBy({
+          by: ['conversationId'],
+         where: {
+            conversationId: { in: conversationIds },
+            isSystem: false,
+            readAt: null,
+            AND: [
+              { senderUserId: { not: null } },
+              { senderUserId: { not: userId } },
+            ],
+          },
+          _count: { _all: true },
+        })
+      : [];
+
+    const unreadCountByConversation = new Map(
+      unreadGroups.map((group) => [
+        group.conversationId,
+        group._count._all,
+      ]),
+    );
+
     return conversations
       .sort((a, b) => {
         const aAt = a.messages[0]?.createdAt.getTime() ?? a.createdAt.getTime();
@@ -84,15 +109,98 @@ export class MessagingService {
         id: conversation.id,
         type: conversation.type,
         title: this.title(conversation),
+        unreadCount: unreadCountByConversation.get(conversation.id) ?? 0,
         lastMessage: conversation.messages[0]
-          ? {
-              body: conversation.messages[0].body,
-              createdAt: conversation.messages[0].createdAt,
-              isSystem: conversation.messages[0].isSystem,
-            }
-          : null,
+        ? {
+            body: conversation.messages[0].body,
+            createdAt: conversation.messages[0].createdAt,
+            isSystem: conversation.messages[0].isSystem,
+            senderUserId: conversation.messages[0].senderUserId,
+            readAt: conversation.messages[0].readAt,
+          }
+        : null,
       }));
   }
+
+  async unreadCount(userId: string) {
+  const user = await this.prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      creatorProfile: true,
+      memberships: {
+        include: { organisation: { include: { brands: true } } },
+      },
+      brandMemberships: true,
+    },
+  });
+
+  if (!user) return 0;
+
+  const brandIds = new Set<string>();
+
+  for (const membership of user.memberships) {
+    if (!hasOrgWideBrandAccess(membership.role)) continue;
+
+    for (const brand of membership.organisation.brands) {
+      brandIds.add(brand.id);
+    }
+  }
+
+  for (const membership of user.brandMemberships) {
+    brandIds.add(membership.brandId);
+  }
+
+  const orFilters: object[] = [];
+
+  if (user.creatorProfile) {
+    orFilters.push({
+      application: { creatorProfileId: user.creatorProfile.id },
+    });
+    orFilters.push({
+      campaign: {
+        participants: {
+          some: { creatorProfileId: user.creatorProfile.id },
+        },
+      },
+    });
+    orFilters.push({
+      creatorProfileId: user.creatorProfile.id,
+    });
+  }
+
+  if (brandIds.size) {
+    orFilters.push({
+      application: { brief: { brandId: { in: [...brandIds] } } },
+    });
+    orFilters.push({
+      campaign: { brandId: { in: [...brandIds] } },
+    });
+    orFilters.push({
+      brandId: { in: [...brandIds] },
+    });
+  }
+
+  const conversations = await this.prisma.conversation.findMany({
+    where: { OR: orFilters.length ? orFilters : [{ id: 'none' }] },
+    select: { id: true },
+  });
+
+  if (!conversations.length) return 0;
+
+  return this.prisma.message.count({
+    where: {
+      conversationId: {
+        in: conversations.map((conversation) => conversation.id),
+      },
+      isSystem: false,
+      readAt: null,
+      AND: [
+        { senderUserId: { not: null } },
+        { senderUserId: { not: userId } },
+      ],
+    },
+  });
+}
 
   async get(userId: string, conversationId: string) {
     await this.access.requireConversationAccess(conversationId, userId);
@@ -187,18 +295,8 @@ export class MessagingService {
       }
     }
     recipientIds.delete(userId);
-    for (const recipientId of recipientIds) {
-      await this.prisma.notification.create({
-        data: {
-          userId: recipientId,
-          type: 'message.new',
-          title: 'New message',
-          body: body.slice(0, 120),
-          href: `/app/messages?c=${conversationId}`,
-          dedupeKey: `message:${message.id}:${recipientId}`,
-        },
-      });
-    }
+  
+    
     await this.prisma.auditEvent.create({
       data: {
         actorId: userId,
@@ -207,17 +305,20 @@ export class MessagingService {
         targetId: message.id,
       },
     });
-    this.realtime.emitMessage({
-      conversationId,
-      message: {
-        id: message.id,
-        body: message.body ?? '',
-        isSystem: false,
-        senderUserId: message.senderUserId ?? userId,
-        createdAt: message.createdAt,
-        readAt: message.readAt,
+        this.realtime.emitMessage(
+      {
+        conversationId,
+        message: {
+          id: message.id,
+          body: message.body ?? '',
+          isSystem: false,
+          senderUserId: message.senderUserId ?? userId,
+          createdAt: message.createdAt,
+          readAt: message.readAt,
+        },
       },
-    });
+      Array.from(recipientIds),
+    );
     return {
       id: message.id,
       body: message.body,
