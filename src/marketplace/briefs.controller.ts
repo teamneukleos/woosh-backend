@@ -84,6 +84,16 @@ export class BriefsController {
     return this.briefs.publish(user.id, id);
   }
 
+  @Post(':id/close')
+  @RequirePermission('briefs.manage')
+  @ApiOperation({ summary: 'Close a brief and stop new applications' })
+  close(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+  ) {
+    return this.briefs.closeBrief(user.id, id);
+  }
+
   @Post(':id/invites')
   @RequirePermission('briefs.manage')
   @ApiOperation({
