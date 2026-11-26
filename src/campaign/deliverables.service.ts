@@ -270,7 +270,7 @@ export class DeliverablesService {
     this.requireTransition(deliverable.state, DeliverableState.APPROVED);
     if (liveUrl) this.requireHttpUrl(liveUrl, 'live URL');
 
-    await this.prisma.$transaction(async (tx) => {
+    const release = await this.prisma.$transaction(async (tx) => {
       await tx.submission.update({
         where: { id: latest.id },
         data: { reviewedAt: new Date(), liveUrl },
@@ -287,12 +287,15 @@ export class DeliverablesService {
       if (transitioned.count !== 1) {
         throw new BadRequestException('Deliverable already reviewed.');
       }
+      // Same transaction: if the payment was never reserved, the approval rolls back too.
+      await this.wallets.approveOnDeliverableApprove(tx, deliverable.participant.id, userId);
+      // Final outstanding deliverable approved → the 72-hour hold starts now.
+      return this.wallets.scheduleReleaseIfFinal(tx, deliverable.participant.id, userId);
     });
 
-    await this.wallets.approveOnDeliverableApprove(
-      deliverable.participant.id,
-      userId,
-    );
+    if (release) {
+      await this.wallets.notifyReleaseScheduled(release.obligationId, release.availableAt);
+    }
     await this.prisma.notification.create({
       data: {
         userId: deliverable.participant.creator.userId,
@@ -304,7 +307,11 @@ export class DeliverablesService {
       },
     });
     await this.audit(userId, 'deliverable.approve', deliverableId);
-    return { id: deliverableId, state: DeliverableState.APPROVED };
+    return {
+      id: deliverableId,
+      state: DeliverableState.APPROVED,
+      payoutReleaseAt: release?.availableAt ?? null,
+    };
   }
 
   async setLive(userId: string, deliverableId: string, liveUrl: string) {
