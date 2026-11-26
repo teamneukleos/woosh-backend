@@ -47,6 +47,17 @@ export class DisputesService {
     if (existing) return existing;
     assertTransition(obligation.status, 'DISPUTED');
     const dispute = await this.prisma.$transaction(async (tx) => {
+      // Freeze only if the payment is still disputable right now. A payout claimed since we
+      // read it (PROCESSING) must never be overwritten, or a refund could pay twice.
+      const frozen = await tx.paymentObligation.updateMany({
+        where: { id: obligation.id, status: { in: ['APPROVED', 'FAILED'] } },
+        data: { status: 'DISPUTED' },
+      });
+      if (frozen.count !== 1) {
+        throw new BadRequestException(
+          'This payment changed while opening the dispute (a payout may be in progress). Refresh and try again.',
+        );
+      }
       const created = await tx.dispute.create({
         data: {
           raisedById: input.actorUserId,
@@ -58,10 +69,6 @@ export class DisputesService {
           requestedResolution: input.requestedResolution?.trim() || undefined,
           responseDueAt: new Date(Date.now() + 2 * 86_400_000),
         },
-      });
-      await tx.paymentObligation.update({
-        where: { id: obligation.id },
-        data: { status: 'DISPUTED' },
       });
       return created;
     });
@@ -185,9 +192,13 @@ export class DisputesService {
     }
     const nextStatus = input.resolutionType === 'RELEASE_PAYOUT' ? 'APPROVED' : 'REVERSED';
     assertTransition(dispute.obligation.status, nextStatus);
+    if (nextStatus === 'REVERSED') {
+      // Never refund the brand while any transfer for this payment could still land or has landed.
+      await this.payouts.assertNoTransferCanLand(dispute.obligationId);
+    }
     await this.prisma.$transaction(async (tx) => {
-      await tx.dispute.update({
-        where: { id: dispute.id },
+      const resolved = await tx.dispute.updateMany({
+        where: { id: dispute.id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
         data: {
           status: 'RESOLVED',
           resolutionType: input.resolutionType,
@@ -196,8 +207,11 @@ export class DisputesService {
           resolvedAt: new Date(),
         },
       });
-      await tx.paymentObligation.update({
-        where: { id: dispute.obligationId },
+      if (resolved.count !== 1) {
+        throw new BadRequestException('This dispute has already been resolved.');
+      }
+      const moved = await tx.paymentObligation.updateMany({
+        where: { id: dispute.obligationId, status: 'DISPUTED' },
         data:
           nextStatus === 'APPROVED'
             ? { status: 'APPROVED', availableAt: new Date() }
@@ -207,6 +221,9 @@ export class DisputesService {
                 reversalReason: input.resolution.trim(),
               },
       });
+      if (moved.count !== 1) {
+        throw new BadRequestException('Payment changed while resolving the dispute; refresh and try again.');
+      }
       if (nextStatus === 'REVERSED') {
         const amount =
           Number(dispute.obligation.grossAmount) + Number(dispute.obligation.platformFee);

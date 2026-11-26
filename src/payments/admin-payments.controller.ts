@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { WorkspaceService } from '../organisation/workspace.service';
+import { AuthorizePayoutRecoveryDto } from './dto/authorize-payout-recovery.dto';
 import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
 import { DisputesService } from './disputes.service';
 import { PayoutService } from './payout.service';
@@ -39,6 +40,24 @@ export class AdminPaymentsController {
   })
   openWindow(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.payouts.openReleaseWindow(id, user.id);
+  }
+
+  @Post('payouts/:id/authorize-recovery')
+  @ApiOperation({
+    summary: 'Authorise one new transfer attempt after a Paystack-confirmed failure',
+    description:
+      'Platform admin. Re-checks the failed reference with Paystack first. Sends nothing; the next payout run uses the authorisation exactly once with a new reference.',
+  })
+  authorizeRecovery(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Body() body: AuthorizePayoutRecoveryDto,
+  ) {
+    return this.payouts.authorizeRecoveryAttempt({
+      obligationId: id,
+      adminUserId: user.id,
+      reason: body.reason,
+    });
   }
 
   @Post('disputes/:id/resolve')

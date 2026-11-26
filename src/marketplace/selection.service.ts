@@ -300,10 +300,35 @@ export class SelectionService {
           ];
 
     const campaign = await this.prisma.$transaction(async (tx) => {
-      await tx.application.update({
-        where: { id: applicationId },
+      // Lock the brief first so concurrent accepts on the same brief run one at a time;
+      // the place count below then sees every previously committed acceptance.
+      await tx.brief.update({
+        where: { id: application.briefId },
+        data: {
+          status:
+            application.brief.status === BriefStatus.CLOSED
+              ? BriefStatus.CLOSED
+              : BriefStatus.SELECTING,
+        },
+      });
+      const claimed = await tx.application.updateMany({
+        where: {
+          id: applicationId,
+          status: { in: [ApplicationStatus.APPLIED, ApplicationStatus.SHORTLISTED] },
+        },
         data: { status: ApplicationStatus.ACCEPTED },
       });
+      if (claimed.count !== 1) {
+        throw new ConflictException('This application has already been accepted or closed.');
+      }
+      if (application.brief.maxCreators != null) {
+        const accepted = await tx.application.count({
+          where: { briefId: application.briefId, status: ApplicationStatus.ACCEPTED },
+        });
+        if (accepted > application.brief.maxCreators) {
+          throw new BadRequestException('This brief has filled all creator places.');
+        }
+      }
       const created = await tx.campaign.create({
         data: {
           briefId: application.briefId,
@@ -327,15 +352,6 @@ export class SelectionService {
           campaignParticipantId: participant.id,
         })),
       });
-     await tx.brief.update({
-      where: { id: application.briefId },
-      data: {
-        status:
-          application.brief.status === BriefStatus.CLOSED
-            ? BriefStatus.CLOSED
-            : BriefStatus.SELECTING,
-      },
-    });
       return tx.campaign.findUniqueOrThrow({
         where: { id: created.id },
         include: { participants: true, deliverables: true },
@@ -354,17 +370,23 @@ export class SelectionService {
         actorUserId: userId,
       });
     } catch (error) {
-      await this.prisma.$transaction([
-        this.prisma.campaign.delete({ where: { id: campaign.id } }),
-        this.prisma.application.update({
+      // Funds were not reserved: undo the campaign and return the application to where it was.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.campaign.delete({ where: { id: campaign.id } });
+        await tx.application.update({
           where: { id: applicationId },
-          data: { status: ApplicationStatus.SHORTLISTED },
-        }),
-        this.prisma.brief.update({
-          where: { id: application.briefId },
-          data: { status: accessApp.brief.status },
-        }),
-      ]);
+          data: { status: application.status },
+        });
+        const stillAccepted = await tx.application.count({
+          where: { briefId: application.briefId, status: ApplicationStatus.ACCEPTED },
+        });
+        if (!stillAccepted) {
+          await tx.brief.updateMany({
+            where: { id: application.briefId, status: BriefStatus.SELECTING },
+            data: { status: accessApp.brief.status },
+          });
+        }
+      });
       throw error;
     }
 

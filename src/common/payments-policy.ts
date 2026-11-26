@@ -6,8 +6,11 @@ const TRANSITIONS: Record<ObligationStatus, readonly ObligationStatus[]> = {
   COMMITTED: ['APPROVED', 'REVERSED', 'DISPUTED'],
   APPROVED: ['PROCESSING', 'DISPUTED', 'REVERSED'],
   PROCESSING: ['PAID', 'FAILED', 'REVERSED'],
-  PAID: [],
-  FAILED: ['PROCESSING', 'DISPUTED', 'REVERSED'],
+  // FAILED: only when Paystack reverses a transfer after it was confirmed paid; the payout
+  // then waits for an admin recovery decision or a dispute refund. Nothing moves automatically.
+  PAID: ['FAILED'],
+  // PAID: Paystack later confirms an attempt we had recorded as failed actually landed.
+  FAILED: ['PROCESSING', 'PAID', 'DISPUTED', 'REVERSED'],
   REVERSED: [],
   DISPUTED: ['APPROVED', 'REVERSED'],
 };

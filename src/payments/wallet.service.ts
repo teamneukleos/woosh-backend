@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -10,7 +9,6 @@ import { randomUUID } from 'crypto';
 import { asNumber, capacityRequired, splitFee } from '../common/fees';
 import {
   assertProductionPaymentConfiguration,
-  canTransitionObligation,
   payoutReleaseAt,
 } from '../common/payments-policy';
 import { PrismaService } from '../prisma/prisma.service';
@@ -442,50 +440,64 @@ export class WalletService {
     });
   }
 
+  /**
+   * Credits a confirmed Paystack collection exactly once. The webhook and the browser's
+   * verify callback can arrive together (and Paystack retries webhooks), so the balance is
+   * only incremented by the request that wins the PENDING→SUCCEEDED claim, or that inserts
+   * the unique `fund_<reference>` ledger row. Every other caller is a no-op.
+   */
   async creditFromPaystack(input: { reference: string; amountKobo: number; brandId: string }) {
-    const existing = await this.prisma.ledgerTransaction.findFirst({
-      where: { providerReference: input.reference },
-    });
-    if (existing?.status === 'SUCCEEDED') {
-      return this.getBalance(input.brandId);
-    }
     const amountMajor = input.amountKobo / 100;
-    const metadata = existing?.metadata as { brandId?: string } | null;
-    if (
-      existing &&
-      (Number(existing.amount) !== amountMajor ||
-        existing.currency !== 'NGN' ||
-        String(metadata?.brandId ?? '') !== input.brandId)
-    ) {
-      throw new BadRequestException('Paystack charge does not match the pending collection.');
-    }
     const wallet = await this.getOrCreate(input.brandId);
-    await this.prisma.$transaction(async (tx) => {
-      if (existing) {
-        await tx.ledgerTransaction.update({
-          where: { id: existing.id },
-          data: { status: 'SUCCEEDED', completedAt: new Date() },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.ledgerTransaction.findFirst({
+          where: { providerReference: input.reference, type: 'COLLECTION' },
         });
-      } else {
-        await tx.ledgerTransaction.create({
-          data: {
-            type: 'COLLECTION',
-            amount: amountMajor,
-            currency: wallet.currency,
-            status: 'SUCCEEDED',
-            provider: 'paystack',
-            providerReference: input.reference,
-            idempotencyKey: `fund_${input.reference}`,
-            metadata: { brandId: input.brandId },
-            completedAt: new Date(),
-          },
+        if (existing?.status === 'SUCCEEDED') return;
+        if (existing) {
+          const metadata = existing.metadata as { brandId?: string } | null;
+          if (
+            Number(existing.amount) !== amountMajor ||
+            existing.currency !== 'NGN' ||
+            String(metadata?.brandId ?? '') !== input.brandId
+          ) {
+            throw new BadRequestException(
+              'Paystack charge does not match the pending collection.',
+            );
+          }
+          // Row lock: a concurrent claimer re-checks the WHERE after we commit and gets 0.
+          const claimed = await tx.ledgerTransaction.updateMany({
+            where: { id: existing.id, status: 'PENDING' },
+            data: { status: 'SUCCEEDED', completedAt: new Date() },
+          });
+          if (claimed.count !== 1) return;
+        } else {
+          // A concurrent insert of the same reference fails on the unique idempotency key.
+          await tx.ledgerTransaction.create({
+            data: {
+              type: 'COLLECTION',
+              amount: amountMajor,
+              currency: wallet.currency,
+              status: 'SUCCEEDED',
+              provider: 'paystack',
+              providerReference: input.reference,
+              idempotencyKey: `fund_${input.reference}`,
+              metadata: { brandId: input.brandId },
+              completedAt: new Date(),
+            },
+          });
+        }
+        await tx.brandWallet.update({
+          where: { id: wallet.id },
+          data: { balance: { increment: amountMajor } },
         });
-      }
-      await tx.brandWallet.update({
-        where: { id: wallet.id },
-        data: { balance: { increment: amountMajor } },
       });
-    });
+    } catch (error) {
+      const alreadyCredited =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+      if (!alreadyCredited) throw error;
+    }
     return this.getBalance(input.brandId);
   }
 
@@ -566,55 +578,44 @@ export class WalletService {
     return obligation;
   }
 
-  async approveOnDeliverableApprove(campaignParticipantId: string, actorUserId: string) {
-    const existing = await this.prisma.paymentObligation.findFirst({
-      where: {
-        campaignParticipantId,
-        status: { notIn: ['REVERSED', 'FAILED', 'PAID'] },
-      },
+  /**
+   * Promotes the creator's reserved payment to APPROVED as part of the caller's transaction.
+   * Never creates a payment: approval only ever moves money that commitOnAccept already took
+   * out of the brand wallet. Later deliverables for the same creator find it APPROVED (no-op).
+   */
+  async approveOnDeliverableApprove(
+    tx: Prisma.TransactionClient,
+    campaignParticipantId: string,
+    actorUserId: string,
+  ) {
+    // Row lock first: approvals for the same creator then run one at a time, so the
+    // "final deliverable" check in scheduleReleaseIfFinal sees every committed approval.
+    const locked = await tx.paymentObligation.updateMany({
+      where: { campaignParticipantId },
+      data: { updatedAt: new Date() },
     });
-    if (existing) {
-        if (existing.status === 'COMMITTED' || existing.status === 'FUNDED') {
-        if (!canTransitionObligation(existing.status, 'APPROVED')) {
-          throw new BadRequestException(
-            `Payment cannot move from ${existing.status} to APPROVED.`,
-          );
-        }
-        const updated = await this.prisma.paymentObligation.update({
-          where: { id: existing.id },
-          data: { status: 'APPROVED', approvedAt: new Date() },
-        });
-        await this.prisma.auditEvent.create({
-          data: {
-            actorId: actorUserId,
-            action: 'payment.obligation.approve',
-            targetType: 'PaymentObligation',
-            targetId: updated.id,
-          },
-        });
-        return updated;
-      }
-      return existing;
+    const obligation = locked.count
+      ? await tx.paymentObligation.findUnique({ where: { campaignParticipantId } })
+      : null;
+    if (!obligation || !(await hasReservedFunds(tx, obligation))) {
+      throw new BadRequestException(
+        'Payment for this creator has not been reserved from the brand wallet, so this work cannot be approved. Contact Woosh support.',
+      );
     }
-
-    const participant = await this.prisma.campaignParticipant.findUnique({
-      where: { id: campaignParticipantId },
+    if (obligation.status === 'APPROVED') return obligation;
+    if (obligation.status !== 'COMMITTED') {
+      throw new BadRequestException(
+        `This creator's payment is ${obligation.status.toLowerCase()}; resolve it before approving more work.`,
+      );
+    }
+    const claimed = await tx.paymentObligation.updateMany({
+      where: { id: obligation.id, status: 'COMMITTED' },
+      data: { status: 'APPROVED', approvedAt: new Date() },
     });
-    if (!participant) throw new NotFoundException('Participant not found.');
-    const gross = Number(participant.agreedRate);
-    const { platformFee, net } = splitFee(gross);
-    const obligation = await this.prisma.paymentObligation.create({
-      data: {
-        campaignParticipantId: participant.id,
-        grossAmount: gross,
-        platformFee,
-        netAmount: net,
-        currency: participant.currency,
-        status: 'APPROVED',
-        approvedAt: new Date(),
-      },
-    });
-    await this.prisma.auditEvent.create({
+    if (claimed.count !== 1) {
+      throw new BadRequestException('Payment changed while approving; refresh and try again.');
+    }
+    await tx.auditEvent.create({
       data: {
         actorId: actorUserId,
         action: 'payment.obligation.approve',
@@ -622,30 +623,104 @@ export class WalletService {
         targetId: obligation.id,
       },
     });
-    return obligation;
+    return { ...obligation, status: 'APPROVED' as const };
   }
 
-  async scheduleRelease(campaignParticipantId: string, completedAt = new Date()) {
-    const obligation = await this.prisma.paymentObligation.findUnique({
-      where: { campaignParticipantId },
-      include: { participant: { include: { creator: true } } },
+  /**
+   * Starts the 72-hour hold when the creator's final outstanding deliverable is approved.
+   * Runs in the approval transaction after approveOnDeliverableApprove (which holds the
+   * payment row lock). Only ever sets a release time once; never moves money.
+   * Returns the release time if this call scheduled it, otherwise null.
+   */
+  async scheduleReleaseIfFinal(
+    tx: Prisma.TransactionClient,
+    campaignParticipantId: string,
+    actorUserId: string,
+    approvedAt = new Date(),
+  ) {
+    const outstanding = await tx.deliverable.count({
+      where: {
+        campaignParticipantId,
+        state: { notIn: ['APPROVED', 'SCHEDULED', 'LIVE', 'COMPLETED'] },
+      },
     });
-    if (!obligation || obligation.status !== 'APPROVED') return obligation;
-    const availableAt = payoutReleaseAt(completedAt);
-    const updated = await this.prisma.paymentObligation.update({
-      where: { id: obligation.id },
+    if (outstanding > 0) return null;
+    const obligation = await tx.paymentObligation.findUnique({
+      where: { campaignParticipantId },
+    });
+    if (!obligation) return null;
+    const availableAt = payoutReleaseAt(approvedAt);
+    const scheduled = await tx.paymentObligation.updateMany({
+      where: { id: obligation.id, status: 'APPROVED', availableAt: null },
       data: { availableAt },
     });
+    if (scheduled.count !== 1) return null;
+    await tx.auditEvent.create({
+      data: {
+        actorId: actorUserId,
+        action: 'payment.release.schedule',
+        targetType: 'PaymentObligation',
+        targetId: obligation.id,
+        after: { availableAt: availableAt.toISOString(), trigger: 'final_approval' },
+      },
+    });
+    return { obligationId: obligation.id, availableAt };
+  }
+
+  /** Tells the creator their payout is scheduled. Safe to call more than once. */
+  async notifyReleaseScheduled(obligationId: string, availableAt: Date) {
+    const obligation = await this.prisma.paymentObligation.findUnique({
+      where: { id: obligationId },
+      include: { participant: { include: { creator: true } } },
+    });
+    if (!obligation) return;
     await notify(this.prisma, {
       userId: obligation.participant.creator.userId,
       type: 'payment.release.scheduled',
       title: 'Payout release scheduled',
       body: `Your payout will be released after ${availableAt.toISOString()} unless a dispute is opened.`,
       href: '/app/earnings',
-      dedupeKey: `payment-release:${obligation.id}:${availableAt.toISOString()}`,
+      dedupeKey: `payment-release:${obligation.id}`,
     });
-    return updated;
   }
+
+  /**
+   * Completion path (Mark complete). Only schedules a release that approval has not already
+   * scheduled; it never restarts or extends an existing 72-hour hold.
+   */
+  async scheduleRelease(campaignParticipantId: string, completedAt = new Date()) {
+    const obligation = await this.prisma.paymentObligation.findUnique({
+      where: { campaignParticipantId },
+    });
+    if (!obligation || obligation.status !== 'APPROVED') return obligation;
+    if (obligation.availableAt) return obligation;
+    const availableAt = payoutReleaseAt(completedAt);
+    const scheduled = await this.prisma.paymentObligation.updateMany({
+      where: { id: obligation.id, status: 'APPROVED', availableAt: null },
+      data: { availableAt },
+    });
+    if (scheduled.count === 1) await this.notifyReleaseScheduled(obligation.id, availableAt);
+    return this.prisma.paymentObligation.findUnique({ where: { id: obligation.id } });
+  }
+}
+
+/**
+ * True only when commitOnAccept actually debited the brand wallet for this payment: the
+ * SUCCEEDED `commit_<participant>` ledger row exists, belongs to it and covers the gross.
+ */
+export async function hasReservedFunds(
+  db: Prisma.TransactionClient | PrismaService,
+  obligation: { id: string; campaignParticipantId: string; grossAmount: Prisma.Decimal | number },
+) {
+  const reservation = await db.ledgerTransaction.findUnique({
+    where: { idempotencyKey: `commit_${obligation.campaignParticipantId}` },
+  });
+  return Boolean(
+    reservation &&
+      reservation.status === 'SUCCEEDED' &&
+      reservation.obligationId === obligation.id &&
+      Number(reservation.amount) >= capacityRequired(Number(obligation.grossAmount)),
+  );
 }
 
 function normalizeNgPhone(raw: string) {
