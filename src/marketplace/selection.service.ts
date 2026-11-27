@@ -17,6 +17,7 @@ import { hasPermission } from '../common/permissions';
 import { canRespondToOffer, canWithdrawApplication } from '../common/work-policy';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { WalletService } from '../payments/wallet.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ApplyBriefDto } from './dto/apply-brief.dto';
 
@@ -35,6 +36,7 @@ export class SelectionService {
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
     private readonly wallets: WalletService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async apply(userId: string, creatorProfileId: string, briefId: string, input: ApplyBriefDto) {
@@ -140,17 +142,15 @@ export class SelectionService {
       });
     }
 
-    for (const member of application.brief.brand.memberships) {
-      await this.prisma.notification.create({
-        data: {
-          userId: member.userId,
-          type: 'application.received',
-          title: 'New application',
-          body: `${application.creator.displayName} applied to ${brief.title}`,
-          href: `/app/briefs/${brief.id}`,
-        },
-      });
-    }
+    await this.notifications.notifyBrand(brief.brandId, {
+      type: 'application.received',
+      title: invitation
+        ? `${application.creator.displayName} accepted your invitation`
+        : 'New application',
+      body: `${application.creator.displayName} applied to ${brief.title}`,
+      href: `/app/briefs/${brief.id}`,
+      dedupePrefix: `application-received:${application.id}`,
+    });
     await this.audit(userId, 'application.create', 'Application', application.id);
     return { id: application.id, status: application.status, briefId: application.briefId };
   }
@@ -196,14 +196,13 @@ export class SelectionService {
       include: { creator: true, brief: true },
     });
     await this.ensureApplicationConversation(applicationId);
-    await this.prisma.notification.create({
-      data: {
-        userId: updated.creator.userId,
-        type: 'application.shortlisted',
-        title: "You've been shortlisted",
-        body: updated.brief.title,
-        href: `/app/jobs/${updated.briefId}`,
-      },
+    await this.notifications.create({
+      userId: updated.creator.userId,
+      type: 'application.shortlisted',
+      title: "You've been shortlisted",
+      body: updated.brief.title,
+      href: `/app/jobs/${updated.briefId}`,
+      dedupeKey: `application-shortlisted:${updated.id}`,
     });
     await this.audit(userId, 'application.shortlist', 'Application', applicationId);
     return { id: updated.id, status: updated.status };
@@ -228,14 +227,13 @@ export class SelectionService {
       data: { status: ApplicationStatus.DECLINED },
       include: { creator: true, brief: true },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: updated.creator.userId,
-        type: 'application.declined',
-        title: 'Application update',
-        body: `Not selected for ${updated.brief.title}`,
-        href: `/app/jobs/${updated.briefId}`,
-      },
+    await this.notifications.create({
+      userId: updated.creator.userId,
+      type: 'application.declined',
+      title: 'Application update',
+      body: `Not selected for ${updated.brief.title}`,
+      href: `/app/jobs/${updated.briefId}`,
+      dedupeKey: `application-declined:${updated.id}`,
     });
     await this.audit(userId, 'application.decline', 'Application', applicationId);
     return { id: updated.id, status: updated.status };
@@ -403,14 +401,13 @@ export class SelectionService {
         },
       },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: application.creator.userId,
-        type: 'application.accepted',
-        title: "You're on the campaign",
-        body: application.brief.title,
-        href: `/app/campaigns/${campaign.id}`,
-      },
+    await this.notifications.create({
+      userId: application.creator.userId,
+      type: 'application.accepted',
+      title: "You're on the campaign",
+      body: application.brief.title,
+      href: `/app/campaigns/${campaign.id}`,
+      dedupeKey: `application-accepted:${applicationId}`,
     });
     await this.audit(userId, 'application.accept', 'Application', applicationId, {
       campaignId: campaign.id,
@@ -484,6 +481,11 @@ export class SelectionService {
         body: `Counter-offer: ${amount} ${application.currency}${message ? ` — ${message}` : ''}`,
       },
     });
+    await this.notifyOfferCounterparty(side, application, offer.id, {
+      type: 'offer.countered',
+      title: 'New offer to review',
+      body: `${side === 'brand' ? 'The brand' : application.creator.displayName} proposed ${application.currency} ${amount.toLocaleString()} for ${application.brief.title}.`,
+    });
     await this.audit(userId, 'offer.counter', 'Offer', offer.id);
     return { id: offer.id, amount, currency: application.currency, status: offer.status, side };
   }
@@ -540,6 +542,11 @@ export class SelectionService {
         body: `Offer agreed at ${offer.amount} ${offer.currency}`,
       },
     });
+    await this.notifyOfferCounterparty(access.side, access.application, offer.id, {
+      type: 'offer.agreed',
+      title: 'Offer accepted',
+      body: `${access.side === 'brand' ? 'The brand' : access.application.creator.displayName} accepted ${offer.currency} ${Number(offer.amount).toLocaleString()} for ${access.application.brief.title}.`,
+    });
     await this.audit(userId, 'offer.accept', 'Offer', offer.id);
     return { id: updated.id, status: updated.status, amount: Number(updated.amount) };
   }
@@ -568,16 +575,14 @@ export class SelectionService {
             moderationNotes: reason || 'Profile needs changes',
           },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: profile.userId,
-        type: approve ? 'creator.approved' : 'creator.rejected',
-        title: approve ? 'Your creator profile is live' : 'Profile needs changes',
-        body:
-          reason ||
-          (approve ? 'Brands can now discover you.' : 'Review the feedback and resubmit.'),
-        href: '/app/profile',
-      },
+    await this.notifications.create({
+      userId: profile.userId,
+      type: approve ? 'creator.approved' : 'creator.rejected',
+      title: approve ? 'Your creator profile is live' : 'Profile needs changes',
+      body:
+        reason ||
+        (approve ? 'Brands can now discover you.' : 'Review the feedback and resubmit.'),
+      href: '/app/profile',
     });
     await this.audit(
       adminId,
@@ -693,6 +698,30 @@ export class SelectionService {
           : null;
     if (!side) throw new ForbiddenException('You cannot access this application.');
     return { actor, application, side };
+  }
+
+  /** The side that did not act: the creator, or everyone who can see the brand. */
+  private async notifyOfferCounterparty(
+    actorSide: string,
+    application: { id: string; briefId: string; brief: { brandId: string }; creator: { userId: string } },
+    offerId: string,
+    input: { type: string; title: string; body: string },
+  ) {
+    if (actorSide === 'brand') {
+      await this.notifications.create({
+        ...input,
+        userId: application.creator.userId,
+        href: `/app/jobs/${application.briefId}`,
+        dedupeKey: `${input.type}:${offerId}:${application.creator.userId}`,
+      });
+      return;
+    }
+    await this.notifications.notifyBrand(application.brief.brandId, {
+      ...input,
+      href: `/app/briefs/${application.briefId}`,
+      dedupePrefix: `${input.type}:${offerId}`,
+      excludeUserId: application.creator.userId,
+    });
   }
 
   private async ensureApplicationConversation(applicationId: string) {

@@ -6,6 +6,7 @@ jest.mock('./paystack.client', () => ({
   verifyTransfer: jest.fn(),
 }));
 
+import { testNotifications } from '../test-support/notifications';
 import { SelectionService } from '../marketplace/selection.service';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -41,13 +42,15 @@ describeWithDb(
       prisma = createTestPrisma();
       await prisma.$connect();
       const workspace = new WorkspaceService(prisma);
+      const notifications = testNotifications(prisma);
       selection = new SelectionService(
         prisma,
         workspace,
-        new WalletService(prisma, workspace),
+        new WalletService(prisma, workspace, notifications),
+        notifications,
       );
-      payouts = new PayoutService(prisma, workspace);
-      disputes = new DisputesService(prisma, workspace, payouts);
+      payouts = new PayoutService(prisma, workspace, notifications);
+      disputes = new DisputesService(prisma, workspace, payouts, notifications);
     });
     afterAll(() => prisma.$disconnect());
     beforeEach(async () => {

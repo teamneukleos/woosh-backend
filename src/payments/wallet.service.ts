@@ -12,7 +12,7 @@ import {
   payoutReleaseAt,
 } from '../common/payments-policy';
 import { PrismaService } from '../prisma/prisma.service';
-import { notify } from './notify';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   assignDedicatedVirtualAccount,
   createDedicatedVirtualAccount,
@@ -39,6 +39,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async getOrCreate(brandId: string, currency = 'NGN') {
@@ -449,12 +450,13 @@ export class WalletService {
   async creditFromPaystack(input: { reference: string; amountKobo: number; brandId: string }) {
     const amountMajor = input.amountKobo / 100;
     const wallet = await this.getOrCreate(input.brandId);
+    let credited = false;
     try {
-      await this.prisma.$transaction(async (tx) => {
+      credited = await this.prisma.$transaction(async (tx) => {
         const existing = await tx.ledgerTransaction.findFirst({
           where: { providerReference: input.reference, type: 'COLLECTION' },
         });
-        if (existing?.status === 'SUCCEEDED') return;
+        if (existing?.status === 'SUCCEEDED') return false;
         if (existing) {
           const metadata = existing.metadata as { brandId?: string } | null;
           if (
@@ -471,7 +473,7 @@ export class WalletService {
             where: { id: existing.id, status: 'PENDING' },
             data: { status: 'SUCCEEDED', completedAt: new Date() },
           });
-          if (claimed.count !== 1) return;
+          if (claimed.count !== 1) return false;
         } else {
           // A concurrent insert of the same reference fails on the unique idempotency key.
           await tx.ledgerTransaction.create({
@@ -492,11 +494,23 @@ export class WalletService {
           where: { id: wallet.id },
           data: { balance: { increment: amountMajor } },
         });
+        return true;
       });
     } catch (error) {
       const alreadyCredited =
         error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
       if (!alreadyCredited) throw error;
+    }
+    // After commit, and only from the call that credited: webhook retries stay silent.
+    if (credited) {
+      await this.notifications.notifyBrand(input.brandId, {
+        type: 'wallet.funded',
+        title: 'Wallet funded',
+        body: `${wallet.currency} ${amountMajor.toLocaleString()} was added to your Woosh wallet.`,
+        href: '/app/payments',
+        permission: 'payments.approve',
+        dedupePrefix: `wallet-funded:${input.reference}`,
+      });
     }
     return this.getBalance(input.brandId);
   }
@@ -674,11 +688,11 @@ export class WalletService {
       include: { participant: { include: { creator: true } } },
     });
     if (!obligation) return;
-    await notify(this.prisma, {
+    await this.notifications.create({
       userId: obligation.participant.creator.userId,
       type: 'payment.release.scheduled',
       title: 'Payout release scheduled',
-      body: `Your payout will be released after ${availableAt.toISOString()} unless a dispute is opened.`,
+      body: `Your payout will be released after ${formatUtc(availableAt)} unless a dispute is opened.`,
       href: '/app/earnings',
       dedupeKey: `payment-release:${obligation.id}`,
     });
@@ -734,4 +748,16 @@ function normalizeNgPhone(raw: string) {
 function mockDvaAccountNumber(brandId: string) {
   const digits = brandId.replace(/\D/g, '').padEnd(9, '0').slice(0, 9);
   return `9${digits}`;
+}
+
+/** "26 Nov 2026, 14:05 UTC" — readable in email and in-app copy. */
+export function formatUtc(value: Date) {
+  return `${value.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  })} UTC`;
 }

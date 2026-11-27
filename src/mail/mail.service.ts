@@ -64,6 +64,8 @@ export class MailService {
         html: payload.html,
         text: payload.text,
       }),
+      // A slow provider must not hold up the product request that triggered the email.
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {

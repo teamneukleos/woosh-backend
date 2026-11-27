@@ -134,12 +134,22 @@ export function inAppNotificationMessage(input: {
   title: string;
   body: string;
   href: string;
+  ctaLabel?: string;
+  /** Link to notification settings, shown as an unsubscribe-style footer. */
+  settingsHref?: string;
 }): MailPayload {
+  const cta = input.ctaLabel || 'Open in Woosh';
+  const footer = input.settingsHref
+    ? `<p style="color:#667085;font-size:12px">You get this email because email notifications are on. <a href="${escapeHtml(input.settingsHref)}">Manage notification settings</a>.</p>`
+    : '';
+  const footerText = input.settingsHref
+    ? `\n\nManage notification settings: ${input.settingsHref}`
+    : '';
   return {
     to: '',
     subject: input.title,
-    html: shell(escapeHtml(input.body), 'Open in Woosh', input.href),
-    text: `${input.body}\n\n${input.href}`,
+    html: `<p><strong>${escapeHtml(input.title)}</strong></p>${shell(escapeHtml(input.body), cta, input.href)}${footer}`,
+    text: `${input.title}\n\n${input.body}\n\n${cta}: ${input.href}${footerText}`,
   };
 }
 

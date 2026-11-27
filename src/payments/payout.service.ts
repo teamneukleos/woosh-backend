@@ -14,7 +14,7 @@ import {
 } from '../common/payments-policy';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { notify } from './notify';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   initiateTransfer,
   PaystackError,
@@ -117,6 +117,7 @@ export class PayoutService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async requireObligationAccess(obligationId: string, userId: string) {
@@ -426,7 +427,6 @@ export class PayoutService {
       type: 'payment.payout.initiated',
       title: 'Payout processing',
       body: `${obligation.currency} ${net.toLocaleString()} is being sent to the creator’s verified bank account.`,
-      href: '/app/earnings',
     });
     return { mode: 'paystack', status: 'processing', reference };
   }
@@ -533,7 +533,6 @@ export class PayoutService {
           type: input.reversed ? 'payment.reversed' : 'payment.failed',
           title: input.reversed ? 'Payout reversed' : 'Payout failed',
           body: input.failureReason || 'The payout provider could not complete this transfer.',
-          href: '/app/earnings',
         });
       }
       return tx;
@@ -560,7 +559,6 @@ export class PayoutService {
       type: 'payment.paid',
       title: 'Creator payout completed',
       body: `${tx.currency} ${Number(tx.amount).toLocaleString()} has been paid.`,
-      href: '/app/earnings',
     });
     return tx;
   }
@@ -643,7 +641,6 @@ export class PayoutService {
         type: 'payment.reversed',
         title: 'Payout reversed by the bank',
         body: `${detail}. Woosh will review this payout; it is not shown as paid.`,
-        href: '/app/earnings',
       });
     }
   }
@@ -674,7 +671,7 @@ export class PayoutService {
       }
       if (!obligation.participant.creator.payoutAccount?.verifiedAt) {
         results.missingAccount += 1;
-        await notify(this.prisma, {
+        await this.notifications.create({
           userId: obligation.participant.creator.userId,
           type: 'payment.account.required',
           title: 'Add a verified payout account',
@@ -1008,43 +1005,38 @@ export class PayoutService {
     return { mode: 'test' as const, status: 'paid' as const, reference: input.reference };
   }
 
+  /**
+   * Creator plus the users who can see the brand (never other brands' teammates in the
+   * same organisation). Creators land on Earnings, brand users on Payments.
+   */
   private async notifyParties(
     obligationId: string,
-    input: { type: string; title: string; body: string; href: string },
+    input: { type: string; title: string; body: string },
   ) {
     const obligation = await this.prisma.paymentObligation.findUniqueOrThrow({
       where: { id: obligationId },
-      include: {
-        participant: {
-          include: {
-            creator: true,
-            campaign: {
-              include: {
-                brand: {
-                  include: {
-                    memberships: true,
-                    organisation: { include: { memberships: true } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      include: { participant: { include: { creator: true, campaign: true } } },
     });
-    const users = new Set([
-      obligation.participant.creator.userId,
-      ...obligation.participant.campaign.brand.memberships.map((row) => row.userId),
-      ...obligation.participant.campaign.brand.organisation.memberships.map((row) => row.userId),
-    ]);
-    await Promise.all(
-      [...users].map((userId) =>
-        notify(this.prisma, {
-          userId,
-          ...input,
-          dedupeKey: `${input.type}:${obligationId}:${userId}:${obligation.status}`,
-        }),
-      ),
+    const creatorUserId = obligation.participant.creator.userId;
+    const dedupe = (userId: string) =>
+      `${input.type}:${obligationId}:${userId}:${obligation.status}`;
+    await this.notifications.create({
+      userId: creatorUserId,
+      ...input,
+      href: '/app/earnings',
+      dedupeKey: dedupe(creatorUserId),
+    });
+    const brandUsers = await this.notifications.brandRecipients(
+      obligation.participant.campaign.brandId,
     );
+    for (const userId of brandUsers) {
+      if (userId === creatorUserId) continue;
+      await this.notifications.create({
+        userId,
+        ...input,
+        href: '/app/payments',
+        dedupeKey: dedupe(userId),
+      });
+    }
   }
 }

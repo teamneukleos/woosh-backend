@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { hasOrgWideBrandAccess } from '../common/permissions';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAccessService } from './access.service';
 import { MessagingGateway } from './messaging.gateway';
@@ -10,6 +11,7 @@ export class MessagingService {
     private readonly prisma: PrismaService,
     private readonly access: CampaignAccessService,
     private readonly realtime: MessagingGateway,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(userId: string) {
@@ -213,6 +215,16 @@ export class MessagingService {
       },
       data: { readAt: new Date() },
     });
+    // Reading the thread clears its "new message" notification, so the next one can email.
+    await this.prisma.notification.updateMany({
+      where: {
+        userId,
+        type: 'message.received',
+        href: `/app/messages?c=${conversationId}`,
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
@@ -220,7 +232,7 @@ export class MessagingService {
         application: {
           include: {
             brief: { include: { brand: { select: { name: true } } } },
-            creator: { select: { displayName: true } },
+            creator: { select: { displayName: true, userId: true } },
           },
         },
         campaign: {
@@ -236,6 +248,29 @@ export class MessagingService {
         creator: { select: { displayName: true } },
       },
     });
+    // Message.offerId has no Prisma relation, so load linked offers in one extra query
+    // (only when the thread has any).
+    const offerIds = [
+      ...new Set(
+        conversation.messages
+          .map((message) => message.offerId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const offers = offerIds.length
+      ? await this.prisma.offer.findMany({
+          where: { id: { in: offerIds } },
+          select: {
+            id: true,
+            status: true,
+            createdById: true,
+            amount: true,
+            currency: true,
+          },
+        })
+      : [];
+    const offerById = new Map(offers.map((offer) => [offer.id, offer]));
+    const creatorUserId = conversation.application?.creator.userId;
     return {
       id: conversation.id,
       type: conversation.type,
@@ -247,6 +282,11 @@ export class MessagingService {
         senderUserId: message.senderUserId,
         createdAt: message.createdAt,
         readAt: message.readAt,
+        // Display data only; agreeing still goes through POST /offers/:id/agree.
+        offer: this.offerView(
+          message.offerId ? offerById.get(message.offerId) : undefined,
+          creatorUserId,
+        ),
       })),
     };
   }
@@ -295,8 +335,7 @@ export class MessagingService {
       }
     }
     recipientIds.delete(userId);
-  
-    
+
     await this.prisma.auditEvent.create({
       data: {
         actorId: userId,
@@ -319,11 +358,56 @@ export class MessagingService {
       },
       Array.from(recipientIds),
     );
+    // After the realtime emit, so email latency never delays live chat delivery.
+    if (conversation && recipientIds.size) {
+      const senderCreator =
+        conversation.application?.creator.userId === userId
+          ? conversation.application.creator
+          : conversation.campaign?.participants.find((row) => row.creator.userId === userId)
+              ?.creator;
+      const brandName =
+        conversation.application?.brief.brand.name ?? conversation.campaign?.brand.name;
+      await this.notifications.notifyNewMessage({
+        messageId: message.id,
+        conversationId,
+        recipientIds,
+        senderName: senderCreator?.displayName ?? brandName ?? 'your Woosh contact',
+        contextTitle: this.title(conversation),
+      });
+    }
+
     return {
       id: message.id,
       body: message.body,
       senderUserId: message.senderUserId,
       createdAt: message.createdAt,
+    };
+  }
+
+  private offerView(
+    offer:
+      | {
+          id: string;
+          status: string;
+          createdById: string;
+          amount: unknown;
+          currency: string;
+        }
+      | undefined,
+    creatorUserId: string | undefined,
+  ) {
+    if (!offer) return null;
+    return {
+      id: offer.id,
+      status: offer.status,
+      createdById: offer.createdById,
+      createdBySide: !creatorUserId
+        ? null
+        : offer.createdById === creatorUserId
+          ? ('creator' as const)
+          : ('brand' as const),
+      amount: Number(offer.amount),
+      currency: offer.currency,
     };
   }
 

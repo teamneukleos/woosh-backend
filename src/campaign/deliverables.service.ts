@@ -7,6 +7,7 @@ import { DeliverableState } from '@prisma/client';
 import { canTransitionDeliverable, idempotencyMatches } from '../common/work-policy';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { WalletService } from '../payments/wallet.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { validateUpload } from '../storage/upload-policy';
@@ -20,6 +21,7 @@ export class DeliverablesService {
     private readonly workspace: WorkspaceService,
     private readonly wallets: WalletService,
     private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async start(userId: string, deliverableId: string) {
@@ -172,7 +174,7 @@ export class DeliverablesService {
       { isolationLevel: 'Serializable' },
     );
 
-    await this.notifyBrandUsers(deliverable.campaign.brandId, {
+    await this.notifications.notifyBrand(deliverable.campaign.brandId, {
       type: 'deliverable.submitted',
       title: isRevision ? 'Revision submitted' : 'Draft submitted',
       body: deliverable.title,
@@ -234,15 +236,13 @@ export class DeliverablesService {
         throw new BadRequestException('Deliverable already reviewed.');
       }
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: deliverable.participant.creator.userId,
-        type: 'deliverable.revision',
-        title: 'Revision requested',
-        body: notes.slice(0, 120),
-        href: `/app/campaigns/${deliverable.campaignId}`,
-        dedupeKey: `deliverable-revision:${latest.id}`,
-      },
+    await this.notifications.create({
+      userId: deliverable.participant.creator.userId,
+      type: 'deliverable.revision',
+      title: 'Revision requested',
+      body: notes.slice(0, 120),
+      href: `/app/campaigns/${deliverable.campaignId}`,
+      dedupeKey: `deliverable-revision:${latest.id}`,
     });
     await this.audit(userId, 'deliverable.revision_requested', deliverableId);
     return { id: deliverableId, state: DeliverableState.REVISION_REQUESTED };
@@ -296,15 +296,13 @@ export class DeliverablesService {
     if (release) {
       await this.wallets.notifyReleaseScheduled(release.obligationId, release.availableAt);
     }
-    await this.prisma.notification.create({
-      data: {
-        userId: deliverable.participant.creator.userId,
-        type: 'deliverable.approved',
-        title: 'Deliverable approved',
-        body: deliverable.title,
-        href: `/app/campaigns/${deliverable.campaignId}`,
-        dedupeKey: `deliverable-approved:${deliverable.id}`,
-      },
+    await this.notifications.create({
+      userId: deliverable.participant.creator.userId,
+      type: 'deliverable.approved',
+      title: 'Deliverable approved',
+      body: deliverable.title,
+      href: `/app/campaigns/${deliverable.campaignId}`,
+      dedupeKey: `deliverable-approved:${deliverable.id}`,
     });
     await this.audit(userId, 'deliverable.approve', deliverableId);
     return {
@@ -418,41 +416,6 @@ export class DeliverablesService {
       throw new BadRequestException(`${label} must use HTTP or HTTPS.`);
     }
     return parsed.toString();
-  }
-
-  private async notifyBrandUsers(
-    brandId: string,
-    input: {
-      type: string;
-      title: string;
-      body: string;
-      href: string;
-      dedupePrefix: string;
-    },
-  ) {
-    const brand = await this.prisma.brand.findUniqueOrThrow({
-      where: { id: brandId },
-      include: {
-        memberships: true,
-        organisation: { include: { memberships: true } },
-      },
-    });
-    const users = new Set([
-      ...brand.memberships.map((row) => row.userId),
-      ...brand.organisation.memberships.map((row) => row.userId),
-    ]);
-    for (const userId of users) {
-      await this.prisma.notification.create({
-        data: {
-          userId,
-          type: input.type,
-          title: input.title,
-          body: input.body,
-          href: input.href,
-          dedupeKey: `${input.dedupePrefix}:${userId}`,
-        },
-      });
-    }
   }
 
   private async audit(actorId: string, action: string, targetId: string, after?: object) {
