@@ -3,7 +3,7 @@ import type { DisputeCategory, DisputeResolutionType } from '@prisma/client';
 import { canTransitionObligation, disputeWindowOpen } from '../common/payments-policy';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { notify } from './notify';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PayoutService } from './payout.service';
 
 function assertTransition(
@@ -21,6 +21,7 @@ export class DisputesService {
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
     private readonly payouts: PayoutService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async open(input: {
@@ -81,14 +82,19 @@ export class DisputesService {
         after: { obligationId: obligation.id, category: input.category },
       },
     });
+    // Tell the other side (and the raiser's teammates), never the person who raised it.
     const creatorUserId = obligation.participant.creator.userId;
-    await notify(this.prisma, {
-      userId: creatorUserId,
+    const recipients = new Set([
+      creatorUserId,
+      ...(await this.notifications.brandRecipients(obligation.participant.campaign.brandId)),
+    ]);
+    recipients.delete(input.actorUserId);
+    await this.notifications.createForUsers(recipients, {
       type: 'payment.dispute.opened',
       title: 'Payment dispute opened',
-      body: input.subject,
+      body: `${input.subject.trim()}. The payout is on hold until Woosh resolves it.`,
       href: `/app/disputes/${dispute.id}`,
-      dedupeKey: `dispute-open:${dispute.id}:${creatorUserId}`,
+      dedupePrefix: `dispute-open:${dispute.id}`,
     });
     return dispute;
   }
@@ -260,13 +266,21 @@ export class DisputesService {
         },
       },
     });
-    await notify(this.prisma, {
-      userId: dispute.obligation.participant.creator.userId,
+    const resolvedFor = {
       type: 'payment.dispute.resolved',
       title: 'Payment dispute resolved',
       body: input.resolution.trim().slice(0, 160),
       href: `/app/disputes/${dispute.id}`,
+    };
+    await this.notifications.create({
+      ...resolvedFor,
+      userId: dispute.obligation.participant.creator.userId,
       dedupeKey: `dispute-resolved:${dispute.id}`,
+    });
+    await this.notifications.notifyBrand(dispute.obligation.participant.campaign.brandId, {
+      ...resolvedFor,
+      dedupePrefix: `dispute-resolved:${dispute.id}:brand`,
+      excludeUserId: dispute.obligation.participant.creator.userId,
     });
     return this.prisma.dispute.findUniqueOrThrow({ where: { id: dispute.id } });
   }

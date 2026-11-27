@@ -1,3 +1,4 @@
+import { testNotifications } from '../test-support/notifications';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -26,7 +27,7 @@ describeWithDb('WalletService.creditFromPaystack (real database)', () => {
   beforeAll(async () => {
     prisma = createTestPrisma();
     await prisma.$connect();
-    wallets = new WalletService(prisma, new WorkspaceService(prisma));
+    wallets = new WalletService(prisma, new WorkspaceService(prisma), testNotifications(prisma));
   });
   afterAll(() => prisma.$disconnect());
   beforeEach(() => resetDatabase(prisma));

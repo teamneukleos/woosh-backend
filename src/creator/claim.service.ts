@@ -7,13 +7,17 @@ import {
 import { ProspectStatus, UserStatus } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { hashToken } from '../common/crypto/tokens';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ClaimRegisterDto } from './dto/claim-register.dto';
 import { normalizeHandle } from './handle';
 
 @Injectable()
 export class ClaimService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async getByToken(rawToken: string) {
     const interest = await this.findInterest(rawToken);
@@ -164,14 +168,13 @@ export class ClaimService {
           `Hi ${profile.displayName} — thanks for joining Woosh. Let's talk.`,
       },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: interest.createdById,
-        type: 'prospect.claimed',
-        title: `@${prospect.handle} claimed their profile`,
-        body: `${profile.displayName} is now on Woosh and ready to message.`,
-        href: '/app/messages',
-      },
+    await this.notifications.create({
+      userId: interest.createdById,
+      type: 'prospect.claimed',
+      title: `@${prospect.handle} claimed their profile`,
+      body: `${profile.displayName} is now on Woosh and ready to message.`,
+      href: '/app/messages',
+      dedupeKey: `prospect-claimed:${prospect.id}:${interest.createdById}`,
     });
     const rosterItems = await this.prisma.creatorListItem.findMany({
       where: { prospectId: prospect.id, creatorProfileId: null },
@@ -220,28 +223,26 @@ export class ClaimService {
       attachedBriefs.push(pending);
     }
     for (const pending of attachedBriefs) {
-      await this.prisma.notification.create({
-        data: {
-          userId: user.id,
-          type: 'brief.invited',
-          title: `${pending.brief.brand.name} invited you to ${pending.brief.title}`,
-          body: `${pending.brief.brand.name} invited you to “${pending.brief.title}”. Finish your profile setup before you can apply.`,
-          href: `/app/jobs/${pending.brief.id}`,
-          dedupeKey: `brief-invite:${pending.id}:${profile.id}`,
-        },
+      await this.notifications.create({
+        userId: user.id,
+        type: 'brief.invited',
+        title: `${pending.brief.brand.name} invited you to ${pending.brief.title}`,
+        body: `${pending.brief.brand.name} invited you to “${pending.brief.title}”. Finish your profile setup before you can apply.`,
+        href: `/app/jobs/${pending.brief.id}`,
+        dedupeKey: `brief-invite:${pending.id}:${profile.id}`,
+        // They are claiming right now and the claim email already named this brief.
+        email: false,
       });
     }
 
-    await this.prisma.notification.create({
-      data: {
-        userId: user.id,
-        type: 'claim.complete',
-        title: 'Welcome to Woosh',
-        body: attachedBriefs.length
-          ? `You claimed @${prospect.handle}. Finish your profile setup before you can take the invited brief.`
-          : `You claimed @${prospect.handle}. ${interest.brand.name} is waiting to chat.`,
-        href: attachedBriefs.length ? '/app/profile' : '/app/messages',
-      },
+    await this.notifications.create({
+      userId: user.id,
+      type: 'claim.complete',
+      title: 'Welcome to Woosh',
+      body: attachedBriefs.length
+        ? `You claimed @${prospect.handle}. Finish your profile setup before you can take the invited brief.`
+        : `You claimed @${prospect.handle}. ${interest.brand.name} is waiting to chat.`,
+      href: attachedBriefs.length ? '/app/profile' : '/app/messages',
     });
     await this.prisma.auditEvent.create({
       data: {

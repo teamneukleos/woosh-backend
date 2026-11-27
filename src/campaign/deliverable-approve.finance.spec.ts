@@ -1,3 +1,4 @@
+import { testNotifications } from '../test-support/notifications';
 import { SelectionService } from '../marketplace/selection.service';
 import { WorkspaceService } from '../organisation/workspace.service';
 import { WalletService } from '../payments/wallet.service';
@@ -24,14 +25,16 @@ describeWithDb('DeliverablesService.approve (real database)', () => {
     prisma = createTestPrisma();
     await prisma.$connect();
     const workspace = new WorkspaceService(prisma);
-    const wallets = new WalletService(prisma, workspace);
-    selection = new SelectionService(prisma, workspace, wallets);
+    const notifications = testNotifications(prisma);
+    const wallets = new WalletService(prisma, workspace, notifications);
+    selection = new SelectionService(prisma, workspace, wallets, notifications);
     deliverables = new DeliverablesService(
       prisma,
       new CampaignAccessService(prisma, workspace),
       workspace,
       wallets,
       {} as StorageService,
+      notifications,
     );
   });
   afterAll(() => prisma.$disconnect());

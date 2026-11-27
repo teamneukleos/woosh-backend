@@ -22,6 +22,7 @@ import { asNumber } from '../common/fees';
 import { scoreBriefFit } from '../common/matching';
 import { automatedBriefChecks, moderationPath } from '../common/trust';
 import { WorkspaceService } from '../organisation/workspace.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateBriefDto } from './dto/create-brief.dto';
 
@@ -31,6 +32,7 @@ export class BriefsService {
     private readonly prisma: PrismaService,
     private readonly workspace: WorkspaceService,
     private readonly mail: MailService,
+    private readonly notifications: NotificationsService,
   ) {}
   @Cron(CronExpression.EVERY_MINUTE)
   async closeExpiredBriefs() {
@@ -419,14 +421,14 @@ export class BriefsService {
         create: { briefId, creatorProfileId, message: input.message, status: 'SENT' },
         update: { message: input.message, status: 'SENT' },
       });
-      await this.prisma.notification.create({
-        data: {
-          userId: creator.userId,
-          type: 'brief.invited',
-          title: `${brief.brand.name} invited you to ${brief.title}`,
-          body: this.briefInviteCopy(brief, input.message),
-          href: `/app/jobs/${brief.id}`,
-        },
+      // One per invitation send: re-sending the same invite does not email again.
+      await this.notifications.create({
+        userId: creator.userId,
+        type: 'brief.invited',
+        title: `${brief.brand.name} invited you to ${brief.title}`,
+        body: this.briefInviteCopy(brief, input.message),
+        href: `/app/jobs/${brief.id}`,
+        dedupeKey: `brief-invited:${invite.id}`,
       });
       await this.audit(userId, 'brief.invite', 'BriefInvitation', invite.id);
       return invite;
@@ -561,7 +563,7 @@ export class BriefsService {
     if (invite.status !== 'SENT' && invite.status !== 'VIEWED') {
       throw new BadRequestException('This invitation can no longer be declined.');
     }
-    return this.prisma.briefInvitation.update({
+    const declined = await this.prisma.briefInvitation.update({
       where: { id: invite.id },
       data: {
         status: 'DECLINED',
@@ -569,6 +571,20 @@ export class BriefsService {
         responseReason: reason,
       },
     });
+    const [brief, creator] = await Promise.all([
+      this.prisma.brief.findUniqueOrThrow({ where: { id: declined.briefId } }),
+      this.prisma.creatorProfile.findUnique({ where: { id: creatorProfileId } }),
+    ]);
+    await this.notifications.notifyBrand(brief.brandId, {
+      type: 'invitation.declined',
+      title: `${creator?.displayName ?? 'A creator'} declined your invitation`,
+      body: reason?.trim()
+        ? `${brief.title}: “${reason.trim().slice(0, 160)}”`
+        : `${brief.title}. You can invite other creators from Discover.`,
+      href: `/app/briefs/${declined.briefId}`,
+      dedupePrefix: `invitation-declined:${declined.id}`,
+    });
+    return declined;
   }
 
   async moderate(adminId: string, briefId: string, approve: boolean, reason?: string) {
@@ -583,6 +599,15 @@ export class BriefsService {
       data: approve
         ? { status: BriefStatus.OPEN, publishedAt: new Date() }
         : { status: BriefStatus.CANCELLED },
+    });
+    await this.notifications.notifyBrand(updated.brandId, {
+      type: approve ? 'brief.approved' : 'brief.rejected',
+      title: approve ? `${updated.title} is live` : `${updated.title} was not approved`,
+      body: approve
+        ? 'Your brief passed review and is open for applications.'
+        : reason?.trim() || 'Your brief did not pass review. Contact support for details.',
+      href: `/app/briefs/${updated.id}`,
+      dedupePrefix: `brief-moderated:${updated.id}`,
     });
     await this.audit(
       adminId,

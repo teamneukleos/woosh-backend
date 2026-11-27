@@ -11,6 +11,7 @@ import { hashToken, newOpaqueToken } from '../common/crypto/tokens';
 import { MailService } from '../mail/mail.service';
 import { claimInviteMessage } from '../mail/templates';
 import { WorkspaceService } from '../organisation/workspace.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateProspectDto } from './dto/create-prospect.dto';
 import type { DiscoveryQueryDto } from './dto/discovery-query.dto';
@@ -51,6 +52,7 @@ export class SupplyService {
     private readonly workspace: WorkspaceService,
     private readonly mail: MailService,
     private readonly analytics: AnalyticsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async listDiscovery(
@@ -477,15 +479,13 @@ items.push(...claimedItems, ...prospectItems);
           `Hi ${interest.creatorProfile?.displayName || 'there'} — ${interest.brand.name} would like to work with you.`,
       },
     });
-    await this.prisma.notification.create({
-      data: {
-        userId: notifyUserId,
-        type: 'brand.interest',
-        title: `${interest.brand.name} is interested`,
-        body: interest.message || 'A brand wants to work with you on Woosh.',
-        href: `/app/messages?c=${conversation.id}`,
-        dedupeKey: `brand-interest:${interest.id}`,
-      },
+    await this.notifications.create({
+      userId: notifyUserId,
+      type: 'brand.interest',
+      title: `${interest.brand.name} is interested`,
+      body: interest.message || 'A brand wants to work with you on Woosh.',
+      href: `/app/messages?c=${conversation.id}`,
+      dedupeKey: `brand-interest:${interest.id}`,
     });
   }
 
